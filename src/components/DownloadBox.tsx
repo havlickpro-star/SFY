@@ -7,6 +7,9 @@ import {
   resolveMedia,
   validateTikTokUrl,
   formatDuration,
+  formatBytes,
+  triggerDownload,
+  safeFilename,
 } from "../lib/resolver";
 import type { ResolvedMedia, MediaFormat, ErrorCode } from "../lib/resolver";
 import {
@@ -46,6 +49,9 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
   const [result, setResult] = useState<ResolvedMedia | null>(null);
   const [toast, setToast] = useState(false);
   const [pasteHint, setPasteHint] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [doneIds, setDoneIds] = useState<string[]>([]);
+  const [allBusy, setAllBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -71,6 +77,7 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
       const res = await resolveMedia(url, mode, setStage);
       if (res.ok) {
         setResult(res.data);
+        setDoneIds([]);
         setStatus("done");
       } else {
         setError(res.code);
@@ -100,15 +107,48 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
     }
   }
 
-  function handleFormatDownload(f: MediaFormat) {
-    if (f.url) {
-      window.open(f.url, "_blank", "noopener,noreferrer");
+  function markDone(id: string) {
+    setDoneIds((p) => (p.includes(id) ? p : [...p, id]));
+  }
+
+  function baseFilename(ext: string, suffix?: string): string {
+    if (!result) return `sfy-tiktok.${ext.toLowerCase()}`;
+    return safeFilename(result.authorId || result.title || "tiktok", result.id ? `${result.id}${suffix ?? ""}` : suffix, ext);
+  }
+
+  async function handleFormatDownload(f: MediaFormat) {
+    if (!f.url) {
+      // Pas de lien réel (mode démo) → notification honnête.
+      setToast(true);
+      window.clearTimeout(toastTimer.current);
+      toastTimer.current = window.setTimeout(() => setToast(false), 3200);
       return;
     }
-    // Mode démo : pas de lien réel → notification honnête.
-    setToast(true);
-    window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(false), 3200);
+    setBusyId(f.id);
+    await triggerDownload(f.url, baseFilename(f.ext, `-${f.id}`));
+    setBusyId(null);
+    markDone(f.id);
+  }
+
+  async function handleImageDownload(imgUrl: string, index: number) {
+    const id = `img-${index}`;
+    setBusyId(id);
+    await triggerDownload(imgUrl, baseFilename("jpg", `-photo-${index + 1}`));
+    setBusyId(null);
+    markDone(id);
+  }
+
+  async function handleDownloadAll() {
+    if (!result?.images || allBusy) return;
+    setAllBusy(true);
+    for (let i = 0; i < result.images.length; i++) {
+      setBusyId(`img-${i}`);
+      await triggerDownload(result.images[i], baseFilename("jpg", `-photo-${i + 1}`));
+      markDone(`img-${i}`);
+      setBusyId(null);
+      await new Promise((r) => setTimeout(r, 600));
+    }
+    setAllBusy(false);
   }
 
   function reset() {
@@ -116,6 +156,9 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
     setResult(null);
     setError(null);
     setUrl("");
+    setDoneIds([]);
+    setBusyId(null);
+    setAllBusy(false);
     window.setTimeout(() => inputRef.current?.focus(), 60);
   }
 
@@ -126,6 +169,7 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
     : t.box.readyVideo;
 
   const duration = result ? formatDuration(result.durationSec) : null;
+  const showSlides = !!result?.images?.length;
 
   return (
     <div className="relative">
@@ -227,6 +271,7 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
                     alt={result.title || "TikTok"}
                     className="h-full w-full object-cover"
                     loading="lazy"
+                    referrerPolicy="no-referrer"
                   />
                 ) : (
                   <div className="grad-bg flex h-full w-full items-center justify-center text-white/90">
@@ -254,7 +299,18 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
                   )}
                 </div>
                 <p className="mt-2 truncate text-sm font-bold text-ink">
-                  {result.author || (result.demo ? t.box.demoAuthor : "—")}
+                  {result.authorUrl ? (
+                    <a
+                      href={result.authorUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="link-underline hover:text-brand"
+                    >
+                      {result.author}
+                    </a>
+                  ) : (
+                    result.author || (result.demo ? t.box.demoAuthor : "—")
+                  )}
                 </p>
                 <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted">
                   {result.title || (result.demo ? t.box.demoTitle : "—")}
@@ -272,53 +328,134 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
               </h2>
             </div>
 
-            {/* Formats */}
-            <div className="mt-4 rounded-2xl border border-ink/6 bg-mist/70 p-1.5">
-              <p className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
-                {t.box.formatsLabel}
-              </p>
-              <ul className="divide-y divide-ink/5">
-                {result.formats.map((f) => {
-                  const Ic = KIND_ICON[f.kind];
-                  return (
-                    <li
-                      key={f.id}
-                      className="group flex items-center gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-white"
-                    >
-                      <span className={`flex h-10 w-10 flex-none items-center justify-center rounded-xl transition-colors ${f.primary ? "grad-bg text-white shadow-chip" : "bg-tint text-brand"}`}>
-                        <Ic size={18} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-semibold text-ink">
-                            {t.box[f.labelKey]}
-                          </span>
-                          {f.tag === "noWatermark" && (
-                            <span className="flex items-center gap-1 rounded-full border border-brand/20 bg-tint px-2 py-0.5 text-[10px] font-bold text-brand">
-                              <IconSpark size={11} />
-                              {t.box.noWatermark}
-                            </span>
-                          )}
+            {/* Diapositives (posts photo) */}
+            {showSlides && (
+              <div className="mt-4 rounded-2xl border border-ink/6 bg-mist/70 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
+                    {t.box.photosHeader}
+                    <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[11px] font-bold text-brand">
+                      {result.images!.length}
+                    </span>
+                  </p>
+                  <button
+                    onClick={handleDownloadAll}
+                    disabled={allBusy}
+                    className="btn-primary flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold disabled:opacity-60"
+                  >
+                    {allBusy ? <span className="spin-ring" style={{ width: 14, height: 14 }} aria-hidden /> : <IconDownload size={14} />}
+                    {t.box.downloadAll}
+                  </button>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2.5 sm:grid-cols-4 md:grid-cols-5">
+                  {result.images!.map((img, i) => {
+                    const id = `img-${i}`;
+                    const done = doneIds.includes(id);
+                    return (
+                      <div key={img} className="group relative aspect-[3/4] overflow-hidden rounded-xl bg-tint shadow-soft">
+                        <img
+                          src={img}
+                          alt={`${t.box.photosHeader} ${i + 1}`}
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        />
+                        <span className="absolute left-1.5 top-1.5 rounded-md bg-ink/70 px-1.5 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
+                          {i + 1}
                         </span>
-                        {f.quality && (
-                          <span className="text-xs text-muted">{f.quality}</span>
-                        )}
-                      </span>
-                      <span className="hidden rounded-md border border-ink/10 bg-white px-2 py-1 text-[10px] font-bold tracking-wider text-muted sm:block">
-                        {f.ext}
-                      </span>
-                      <button
-                        onClick={() => handleFormatDownload(f)}
-                        className="btn-primary flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-[13px] font-semibold"
+                        <button
+                          onClick={() => handleImageDownload(img, i)}
+                          disabled={busyId === id}
+                          aria-label={`${t.box.download} ${i + 1}`}
+                          className={`absolute bottom-1.5 right-1.5 flex h-8 w-8 items-center justify-center rounded-lg shadow-chip transition-all duration-200 active:scale-90 ${
+                            done
+                              ? "bg-emerald-500 text-white"
+                              : "bg-white/95 text-brand hover:bg-white"
+                          }`}
+                        >
+                          {busyId === id ? (
+                            <span className="spin-ring" style={{ width: 14, height: 14 }} aria-hidden />
+                          ) : done ? (
+                            <IconCheck size={15} />
+                          ) : (
+                            <IconDownload size={15} />
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Formats */}
+            {!showSlides && (
+              <div className="mt-4 rounded-2xl border border-ink/6 bg-mist/70 p-1.5">
+                <p className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
+                  {t.box.formatsLabel}
+                </p>
+                <ul className="divide-y divide-ink/5">
+                  {result.formats.map((f) => {
+                    const Ic = KIND_ICON[f.kind];
+                    const done = doneIds.includes(f.id);
+                    const meta = [f.quality, formatBytes(f.sizeBytes)].filter(Boolean).join(" · ");
+                    return (
+                      <li
+                        key={f.id}
+                        className="group flex items-center gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-white"
                       >
-                        <IconDownload size={15} />
-                        <span className="hidden sm:inline">{t.box.download}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
+                        <span className={`flex h-10 w-10 flex-none items-center justify-center rounded-xl transition-colors ${f.primary ? "grad-bg text-white shadow-chip" : "bg-tint text-brand"}`}>
+                          <Ic size={18} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold text-ink">
+                              {t.box[f.labelKey]}
+                            </span>
+                            {f.tag === "noWatermark" && (
+                              <span className="flex items-center gap-1 rounded-full border border-brand/20 bg-tint px-2 py-0.5 text-[10px] font-bold text-brand">
+                                <IconSpark size={11} />
+                                {t.box.noWatermark}
+                              </span>
+                            )}
+                          </span>
+                          {meta && <span className="text-xs text-muted">{meta}</span>}
+                        </span>
+                        <span className="hidden rounded-md border border-ink/10 bg-white px-2 py-1 text-[10px] font-bold tracking-wider text-muted sm:block">
+                          {f.ext}
+                        </span>
+                        <button
+                          onClick={() => handleFormatDownload(f)}
+                          disabled={busyId === f.id}
+                          className={`flex w-[7.2rem] items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[13px] font-semibold transition-all duration-200 active:scale-[0.97] ${
+                            done
+                              ? "bg-emerald-500 text-white shadow-chip"
+                              : "btn-primary"
+                          }`}
+                        >
+                          {busyId === f.id ? (
+                            <>
+                              <span className="spin-ring" style={{ width: 15, height: 15 }} aria-hidden />
+                              <span className="hidden sm:inline">{t.box.preparing}</span>
+                            </>
+                          ) : done ? (
+                            <>
+                              <IconCheck size={15} />
+                              <span className="hidden sm:inline">{t.box.downloaded}</span>
+                            </>
+                          ) : (
+                            <>
+                              <IconDownload size={15} />
+                              <span className="hidden sm:inline">{t.box.download}</span>
+                            </>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
 
             {result.demo && (
               <p className="mt-3 flex items-start gap-2 text-xs leading-relaxed text-muted">
@@ -354,7 +491,7 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
       <ul className="mt-5 flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
         {t.trust.map((item) => (
           <li key={item} className="flex items-center gap-1.5 text-[13px] font-medium text-muted">
-            <span className="flex h-4.5 w-4.5 items-center justify-center rounded-full bg-emerald-100 text-emerald-600" style={{ width: 18, height: 18 }}>
+            <span className="flex items-center justify-center rounded-full bg-emerald-100 text-emerald-600" style={{ width: 18, height: 18 }}>
               <IconCheck size={11} />
             </span>
             {item}
@@ -362,7 +499,7 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
         ))}
       </ul>
 
-      {/* Toast démo */}
+      {/* Toast */}
       {toast && (
         <div className="anim-in fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-ink px-5 py-3 text-sm font-medium text-white shadow-lift">
           {t.box.demoToast}

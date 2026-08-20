@@ -2,25 +2,27 @@
 /*  SFY — MediaResolver                                               */
 /*  Facade interne appelée par le frontend (concept : POST /api/resolve).
 /*                                                                    */
-/*  ⚠️ MOCK_MODE = true  → données simulées pour le développement de  */
-/*     l'interface. L'UI les signale clairement (« Démo »).           */
-/*  MOCK_MODE = false → appels au backend réel (/api/resolve) +       */
-/*     métadonnées publiques oEmbed de TikTok en secours.             */
-/*  Aucun contournement de protection : si l'extraction n'est pas     */
-/*  possible proprement, SFY renvoie une erreur claire.               */
+/*  Architecture choisie : résolution via le service public d'extraction
+/*  TikWM (gratuit, sans clé API, CORS ouvert) + téléchargement direct
+/*  des fichiers média côté navigateur (fetch → blob → download, avec
+/*  repli vers l'ouverture du lien). Aucun contournement de protection :
+/*  seul le contenu public est résolu, et si l'extraction échoue, SFY
+/*  renvoie une erreur claire — jamais de faux résultat.              */
+/*                                                                    */
+/*  MOCK_MODE = true → données simulées pour le développement de l'UI
+/*  (clairement signalées « Démo » dans l'interface). false en prod.  */
 /* ================================================================== */
 
 import type { ToolMode } from "./i18n";
 
-const MOCK_MODE = true; // ← passer à false en production (backend réel requis)
-const API_ENDPOINT = "/api/resolve";
+const MOCK_MODE = false; // ← true uniquement pour développer l'interface
 
 export const RATE_LIMIT = {
   max: 10, // analyses max…
   windowMs: 60_000, // …par fenêtre glissante (modifiable)
 };
 
-/* Domains autorisés (allowlist stricte — aucune URL arbitraire). */
+/* Domains TikTok autorisés (allowlist stricte — aucune URL arbitraire). */
 const ALLOWED_HOSTS = [
   "tiktok.com",
   "www.tiktok.com",
@@ -28,6 +30,10 @@ const ALLOWED_HOSTS = [
   "vm.tiktok.com",
   "vt.tiktok.com",
 ];
+
+/* Service public d'extraction (pas de clé, CORS ouvert). */
+const EXTRACT_API = "https://www.tikwm.com/api/";
+const EXTRACT_TIMEOUT_MS = 18_000;
 
 export type ErrorCode = "empty" | "invalid" | "inaccessible" | "rate" | "error";
 export type FormatLabelKey =
@@ -44,20 +50,24 @@ export interface MediaFormat {
   labelKey: FormatLabelKey;
   ext: string;
   quality?: string;
+  sizeBytes?: number;
   tag?: "noWatermark";
   primary?: boolean;
-  url?: string; // présent uniquement si le backend fournit un lien réel
+  url?: string; // lien média réel quand disponible
 }
 
 export interface ResolvedMedia {
   demo: boolean;
   platform: "tiktok";
   sourceUrl: string;
+  id?: string;
   title: string;
   author: string;
+  authorId?: string;
   authorUrl?: string;
   thumbnail?: string;
   durationSec?: number;
+  images?: string[]; // diapositives (posts photo / carrousels)
   formats: MediaFormat[];
 }
 
@@ -67,7 +77,7 @@ export type ResolveResult =
 
 /* ------------------------------------------------------------------ */
 /* Validation & sécurité (anti-SSRF côté client + re-validation côté   */
-/* serveur obligatoire en production)                                  */
+/* serveur recommandée si un backend propre est ajouté)                */
 /* ------------------------------------------------------------------ */
 
 function isPrivateHost(host: string): boolean {
@@ -108,8 +118,8 @@ export function validateTikTokUrl(
 }
 
 /* ------------------------------------------------------------------ */
-/* Rate limiting (fenêtre glissante, persistance locale pour la démo — */
-/* à déplacer côté serveur en production)                              */
+/* Rate limiting (fenêtre glissante — à déplacer côté serveur si un    */
+/* backend propre est ajouté)                                          */
 /* ------------------------------------------------------------------ */
 
 const RL_KEY = "sfy:rate";
@@ -120,9 +130,7 @@ function hitRateLimit(): { limited: boolean } {
     const raw = localStorage.getItem(RL_KEY);
     let hits: number[] = raw ? (JSON.parse(raw) as number[]) : [];
     hits = hits.filter((h) => now - h < RATE_LIMIT.windowMs);
-    if (hits.length >= RATE_LIMIT.max) {
-      return { limited: true };
-    }
+    if (hits.length >= RATE_LIMIT.max) return { limited: true };
     hits.push(now);
     localStorage.setItem(RL_KEY, JSON.stringify(hits));
     return { limited: false };
@@ -132,33 +140,38 @@ function hitRateLimit(): { limited: boolean } {
 }
 
 /* ------------------------------------------------------------------ */
-/* Métadonnées publiques TikTok (oEmbed — endpoint public, pas de clé) */
+/* Extraction réelle (TikWM — service public, sans clé, CORS ouvert)   */
 /* ------------------------------------------------------------------ */
 
-interface OEmbedMeta {
-  title: string;
-  author: string;
-  authorUrl?: string;
-  thumbnail?: string;
+interface TikwmData {
+  id?: string;
+  title?: string;
+  cover?: string;
+  origin_cover?: string;
+  duration?: number;
+  play?: string;
+  wmplay?: string;
+  hdplay?: string;
+  size?: number;
+  wm_size?: number;
+  hd_size?: number;
+  music?: string;
+  images?: string[] | null;
+  author?: { unique_id?: string; nickname?: string };
 }
 
-async function fetchOEmbedMeta(url: string): Promise<OEmbedMeta | null> {
+async function fetchTikwm(url: string): Promise<TikwmData | null> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 4500);
+  const timer = setTimeout(() => ctrl.abort(), EXTRACT_TIMEOUT_MS);
   try {
     const res = await fetch(
-      `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`,
+      `${EXTRACT_API}?url=${encodeURIComponent(url)}&hd=1`,
       { signal: ctrl.signal }
     );
     if (!res.ok) return null;
-    const j = (await res.json()) as Record<string, unknown>;
-    if (!j || typeof j.title !== "string" || !j.title) return null;
-    return {
-      title: j.title,
-      author: typeof j.author_name === "string" ? j.author_name : "",
-      authorUrl: typeof j.author_url === "string" ? j.author_url : undefined,
-      thumbnail: typeof j.thumbnail_url === "string" ? j.thumbnail_url : undefined,
-    };
+    const j = (await res.json()) as { code?: number; data?: TikwmData };
+    if (!j || j.code !== 0 || !j.data) return null;
+    return j.data;
   } catch {
     return null;
   } finally {
@@ -166,30 +179,86 @@ async function fetchOEmbedMeta(url: string): Promise<OEmbedMeta | null> {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Formats disponibles selon le mode                                   */
-/* ------------------------------------------------------------------ */
+function toResolved(d: TikwmData, sourceUrl: string, mode: ToolMode): ResolvedMedia {
+  const authorId = d.author?.unique_id ?? "";
+  const author = d.author?.nickname || (authorId ? `@${authorId}` : "");
+  const images = Array.isArray(d.images) && d.images.length ? d.images : undefined;
 
-function formatsFor(mode: ToolMode): MediaFormat[] {
-  const video: MediaFormat[] = [
-    { id: "no-wm", kind: "video", labelKey: "bestQuality", ext: "MP4", quality: "1080p", tag: "noWatermark", primary: true },
-    { id: "hd", kind: "video", labelKey: "mp4hd", ext: "MP4", quality: "720p" },
-    { id: "sd", kind: "video", labelKey: "mp4std", ext: "MP4", quality: "480p" },
-    { id: "mp3", kind: "audio", labelKey: "mp3", ext: "MP3", quality: "128 kbps" },
-  ];
+  const videoFormats: MediaFormat[] = [];
+  const hd = typeof d.hdplay === "string" ? d.hdplay.trim() : "";
+  const play = typeof d.play === "string" ? d.play.trim() : "";
+  const wm = typeof d.wmplay === "string" ? d.wmplay.trim() : "";
+
+  if (hd) {
+    videoFormats.push({
+      id: "hd", kind: "video", labelKey: "bestQuality", ext: "MP4",
+      quality: "HD", sizeBytes: d.hd_size, tag: "noWatermark", primary: true, url: hd,
+    });
+  }
+  if (play) {
+    videoFormats.push({
+      id: "no-wm", kind: "video",
+      labelKey: hd ? "mp4hd" : "bestQuality", ext: "MP4",
+      quality: hd ? "HD" : undefined, sizeBytes: d.size, tag: "noWatermark",
+      primary: !hd, url: play,
+    });
+  }
+  if (wm) {
+    videoFormats.push({
+      id: "wm", kind: "video", labelKey: "mp4std", ext: "MP4",
+      sizeBytes: d.wm_size, url: wm,
+    });
+  }
+  if (typeof d.music === "string" && d.music.trim()) {
+    videoFormats.push({
+      id: "mp3", kind: "audio", labelKey: "mp3", ext: "MP3",
+      quality: "128 kbps", url: d.music.trim(),
+    });
+  }
+
+  let formats: MediaFormat[];
   if (mode === "mp3") {
-    return [{ id: "mp3", kind: "audio", labelKey: "mp3", ext: "MP3", quality: "128 kbps", primary: true }];
+    const mp3 = videoFormats.find((f) => f.id === "mp3");
+    formats = mp3 ? [{ ...mp3, primary: true }] : [];
+  } else if (mode === "photo" && images) {
+    formats = [{ id: "photos", kind: "image", labelKey: "photos", ext: "JPG", primary: true }];
+  } else {
+    formats = videoFormats;
   }
-  if (mode === "photo") {
-    return [{ id: "photos", kind: "image", labelKey: "photos", ext: "JPG", quality: "HD", primary: true }];
-  }
-  if (mode === "story") {
-    return [{ id: "story", kind: "video", labelKey: "story", ext: "MP4", quality: "720p", primary: true }];
-  }
-  return video;
+
+  return {
+    demo: false,
+    platform: "tiktok",
+    sourceUrl,
+    id: d.id,
+    title: d.title ?? "",
+    author,
+    authorId,
+    authorUrl: authorId ? `https://www.tiktok.com/@${authorId}` : undefined,
+    thumbnail: d.origin_cover || d.cover || undefined,
+    durationSec: typeof d.duration === "number" && d.duration > 0 ? d.duration : undefined,
+    images,
+    formats,
+  };
 }
 
+/* ------------------------------------------------------------------ */
+/* Mode démo (développement de l'interface uniquement)                 */
+/* ------------------------------------------------------------------ */
+
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function demoFormats(mode: ToolMode): MediaFormat[] {
+  const video: MediaFormat[] = [
+    { id: "hd", kind: "video", labelKey: "bestQuality", ext: "MP4", quality: "HD", tag: "noWatermark", primary: true },
+    { id: "no-wm", kind: "video", labelKey: "mp4hd", ext: "MP4", tag: "noWatermark" },
+    { id: "wm", kind: "video", labelKey: "mp4std", ext: "MP4" },
+    { id: "mp3", kind: "audio", labelKey: "mp3", ext: "MP3", quality: "128 kbps" },
+  ];
+  if (mode === "mp3") return [{ id: "mp3", kind: "audio", labelKey: "mp3", ext: "MP3", quality: "128 kbps", primary: true }];
+  if (mode === "photo") return [{ id: "photos", kind: "image", labelKey: "photos", ext: "JPG", primary: true }];
+  return video;
+}
 
 /* ------------------------------------------------------------------ */
 /* Résolution                                                          */
@@ -208,11 +277,8 @@ export async function resolveMedia(
   onStage("analyzing");
 
   if (MOCK_MODE) {
-    /* -------- Mode développement : UI testable, données simulées,
-       métadonnées réelles via oEmbed lorsque c'est possible. -------- */
-    await wait(900);
+    await wait(1100);
     onStage("fetching");
-    const meta = await fetchOEmbedMeta(validation.url);
     await wait(700);
     return {
       ok: true,
@@ -220,60 +286,68 @@ export async function resolveMedia(
         demo: true,
         platform: "tiktok",
         sourceUrl: validation.url,
-        title: meta?.title ?? "",
-        author: meta?.author ?? "",
-        authorUrl: meta?.authorUrl,
-        thumbnail: meta?.thumbnail,
+        title: "",
+        author: "",
         durationSec: 21,
-        formats: formatsFor(mode),
+        formats: demoFormats(mode),
       },
     };
   }
 
-  /* -------- Mode production : backend interne POST /api/resolve ---- */
-  try {
-    const res = await fetch(API_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: validation.url, mode }),
-    });
-    if (!res.ok) {
-      return { ok: false, code: res.status === 429 ? "rate" : res.status === 422 ? "inaccessible" : "error" };
-    }
-    const j = (await res.json()) as {
-      success: boolean;
-      platform?: string;
-      title?: string;
-      author?: string;
-      authorUrl?: string;
-      thumbnail?: string;
-      duration?: number;
-      formats?: MediaFormat[];
-    };
-    if (!j.success || !Array.isArray(j.formats) || j.formats.length === 0) {
-      return { ok: false, code: "inaccessible" };
-    }
-    return {
-      ok: true,
-      data: {
-        demo: false,
-        platform: "tiktok",
-        sourceUrl: validation.url,
-        title: j.title ?? "",
-        author: j.author ?? "",
-        authorUrl: j.authorUrl,
-        thumbnail: j.thumbnail,
-        durationSec: j.duration,
-        formats: j.formats,
-      },
-    };
-  } catch {
-    /* Backend indisponible : on tente les métadonnées publiques ;
-       sans extraction possible, erreur claire — jamais de faux résultat. */
-    const meta = await fetchOEmbedMeta(validation.url);
-    if (!meta) return { ok: false, code: "inaccessible" };
-    return { ok: false, code: "error" };
+  /* Extraction réelle — deux phases perceptibles pour l'utilisateur. */
+  const stageTimer = setTimeout(() => onStage("fetching"), 1600);
+  const data = await fetchTikwm(validation.url);
+  clearTimeout(stageTimer);
+
+  if (!data) return { ok: false, code: "inaccessible" };
+
+  const resolved = toResolved(data, validation.url, mode);
+  if (resolved.formats.length === 0 && !resolved.images) {
+    return { ok: false, code: "inaccessible" };
   }
+  return { ok: true, data: resolved };
+}
+
+/* ------------------------------------------------------------------ */
+/* Téléchargement côté navigateur                                      */
+/* ------------------------------------------------------------------ */
+
+/** fetch → blob → <a download> ; repli : ouverture du lien média. */
+export async function triggerDownload(url: string, filename: string): Promise<boolean> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error();
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 5000);
+    return true;
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return true;
+  }
+}
+
+export function safeFilename(prefix: string, id: string | undefined, ext: string): string {
+  const base = prefix
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "tiktok";
+  return `sfy-${base}${id ? `-${id}` : ""}.${ext.toLowerCase()}`;
+}
+
+export function formatBytes(bytes?: number): string | null {
+  if (!bytes || bytes <= 0) return null;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function formatDuration(sec?: number): string | null {

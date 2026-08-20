@@ -85,6 +85,10 @@ const pt: Dict = {
     photos: "Fotos — JPG",
     story: "Story — MP4",
     noWatermark: "Sem marca d'água",
+    preparing: "Preparando…",
+    downloaded: "Baixado",
+    downloadAll: "Baixar tudo",
+    photosHeader: "Fotos disponíveis",
   },
 
   trust: ["Sem cadastro", "Funciona no celular", "Rápido"],

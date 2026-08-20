@@ -85,6 +85,10 @@ const es: Dict = {
     photos: "Fotos — JPG",
     story: "Historia — MP4",
     noWatermark: "Sin marca de agua",
+    preparing: "Preparando…",
+    downloaded: "Descargado",
+    downloadAll: "Descargar todo",
+    photosHeader: "Fotos disponibles",
   },
 
   trust: ["Sin registro", "Compatible con móvil", "Rápido"],

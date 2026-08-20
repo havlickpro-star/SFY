@@ -137,6 +137,10 @@ const en: Dict = {
     photos: "Photos — JPG",
     story: "Story — MP4",
     noWatermark: "No watermark",
+    preparing: "Preparing…",
+    downloaded: "Downloaded",
+    downloadAll: "Download all",
+    photosHeader: "Available photos",
   },
 
   trust: ["No sign-up", "Mobile friendly", "Fast"],

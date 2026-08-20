@@ -118,6 +118,10 @@ export interface Dict {
     photos: string;
     story: string;
     noWatermark: string;
+    preparing: string;
+    downloaded: string;
+    downloadAll: string;
+    photosHeader: string;
   };
   trust: string[];
   how: { title: string; steps: Step[] };

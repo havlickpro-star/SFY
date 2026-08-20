@@ -85,6 +85,10 @@ const id: Dict = {
     photos: "Foto — JPG",
     story: "Story — MP4",
     noWatermark: "Tanpa watermark",
+    preparing: "Menyiapkan…",
+    downloaded: "Terunduh",
+    downloadAll: "Unduh semua",
+    photosHeader: "Foto tersedia",
   },
 
   trust: ["Tanpa daftar", "Ramah mobile", "Cepat"],
