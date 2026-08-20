@@ -182,7 +182,10 @@ async function fetchTikwm(url: string): Promise<TikwmData | null> {
 function toResolved(d: TikwmData, sourceUrl: string, mode: ToolMode): ResolvedMedia {
   const authorId = d.author?.unique_id ?? "";
   const author = d.author?.nickname || (authorId ? `@${authorId}` : "");
-  const images = Array.isArray(d.images) && d.images.length ? d.images : undefined;
+  const images =
+    Array.isArray(d.images) && d.images.length
+      ? d.images.map(normalizeMediaUrl)
+      : undefined;
 
   const videoFormats: MediaFormat[] = [];
   const hd = typeof d.hdplay === "string" ? d.hdplay.trim() : "";
@@ -192,7 +195,8 @@ function toResolved(d: TikwmData, sourceUrl: string, mode: ToolMode): ResolvedMe
   if (hd) {
     videoFormats.push({
       id: "hd", kind: "video", labelKey: "bestQuality", ext: "MP4",
-      quality: "HD", sizeBytes: d.hd_size, tag: "noWatermark", primary: true, url: hd,
+      quality: "HD", sizeBytes: d.hd_size, tag: "noWatermark", primary: true,
+      url: normalizeMediaUrl(hd),
     });
   }
   if (play) {
@@ -200,19 +204,19 @@ function toResolved(d: TikwmData, sourceUrl: string, mode: ToolMode): ResolvedMe
       id: "no-wm", kind: "video",
       labelKey: hd ? "mp4hd" : "bestQuality", ext: "MP4",
       quality: hd ? "HD" : undefined, sizeBytes: d.size, tag: "noWatermark",
-      primary: !hd, url: play,
+      primary: !hd, url: normalizeMediaUrl(play),
     });
   }
   if (wm) {
     videoFormats.push({
       id: "wm", kind: "video", labelKey: "mp4std", ext: "MP4",
-      sizeBytes: d.wm_size, url: wm,
+      sizeBytes: d.wm_size, url: normalizeMediaUrl(wm),
     });
   }
   if (typeof d.music === "string" && d.music.trim()) {
     videoFormats.push({
       id: "mp3", kind: "audio", labelKey: "mp3", ext: "MP3",
-      quality: "128 kbps", url: d.music.trim(),
+      quality: "128 kbps", url: normalizeMediaUrl(d.music.trim()),
     });
   }
 
@@ -312,25 +316,77 @@ export async function resolveMedia(
 /* Téléchargement côté navigateur                                      */
 /* ------------------------------------------------------------------ */
 
-/** fetch → blob → <a download> ; repli : ouverture du lien média. */
-export async function triggerDownload(url: string, filename: string): Promise<boolean> {
+/* Le service d'extraction renvoie parfois des chemins relatifs
+   (« /api/media/video?id=… ») : on les rattache à son domaine.        */
+export function normalizeMediaUrl(url: string): string {
+  if (url.startsWith("/")) return `https://www.tikwm.com${url}`;
+  return url;
+}
+
+/* Proxies CORS publics : les CDN vidéo (TikTok notamment) ne renvoient
+   pas toujours les en-têtes CORS — le proxy permet de récupérer les
+   octets pour les enregistrer en fichier local.                        */
+const CORS_PROXIES: ((u: string) => string)[] = [
+  (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  (u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+];
+
+async function fetchBlob(url: string, timeoutMs: number): Promise<Blob | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error();
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) return null;
     const blob = await res.blob();
+    if (!blob || blob.size === 0) return null;
+    // Une petite page HTML = page d'erreur, pas un média.
+    if (blob.type.startsWith("text/html") && blob.size < 8192) return null;
+    return blob;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function saveBlob(blob: Blob, filename: string): boolean {
+  try {
     const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = objectUrl;
     a.download = filename;
+    a.rel = "noopener";
     document.body.appendChild(a);
     a.click();
     a.remove();
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 5000);
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 8000);
     return true;
   } catch {
-    window.open(url, "_blank", "noopener,noreferrer");
-    return true;
+    return false;
   }
+}
+
+/**
+ * Enregistre le média comme fichier sur l'appareil.
+ * Stratégie : 1) fetch direct (si l'hôte autorise CORS)
+ *             2) fetch via proxy CORS → blob → enregistrement
+ *             3) dernier recours : ouverture du lien dans un onglet.
+ * Retourne true si le fichier a été enregistré par le navigateur.
+ */
+export async function triggerDownload(rawUrl: string, filename: string): Promise<boolean> {
+  const url = normalizeMediaUrl(rawUrl);
+
+  let blob = await fetchBlob(url, 40_000);
+  for (const proxy of CORS_PROXIES) {
+    if (blob) break;
+    blob = await fetchBlob(proxy(url), 80_000);
+  }
+
+  if (blob && saveBlob(blob, filename)) return true;
+
+  // Dernier recours : l'utilisateur enregistre depuis le lecteur.
+  window.open(url, "_blank", "noopener,noreferrer");
+  return false;
 }
 
 export function safeFilename(prefix: string, id: string | undefined, ext: string): string {

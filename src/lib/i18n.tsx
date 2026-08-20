@@ -122,6 +122,7 @@ export interface Dict {
     downloaded: string;
     downloadAll: string;
     photosHeader: string;
+    openFallback: string;
   };
   trust: string[];
   how: { title: string; steps: Step[] };

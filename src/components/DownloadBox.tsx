@@ -47,7 +47,7 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
   const [stage, setStage] = useState<"analyzing" | "fetching">("analyzing");
   const [error, setError] = useState<ErrorCode | null>(null);
   const [result, setResult] = useState<ResolvedMedia | null>(null);
-  const [toast, setToast] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [pasteHint, setPasteHint] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [doneIds, setDoneIds] = useState<string[]>([]);
@@ -111,6 +111,12 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
     setDoneIds((p) => (p.includes(id) ? p : [...p, id]));
   }
 
+  function showToast(msg: string) {
+    setToastMsg(msg);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToastMsg(null), 4000);
+  }
+
   function baseFilename(ext: string, suffix?: string): string {
     if (!result) return `sfy-tiktok.${ext.toLowerCase()}`;
     return safeFilename(result.authorId || result.title || "tiktok", result.id ? `${result.id}${suffix ?? ""}` : suffix, ext);
@@ -119,36 +125,50 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
   async function handleFormatDownload(f: MediaFormat) {
     if (!f.url) {
       // Pas de lien réel (mode démo) → notification honnête.
-      setToast(true);
-      window.clearTimeout(toastTimer.current);
-      toastTimer.current = window.setTimeout(() => setToast(false), 3200);
+      showToast(t.box.demoToast);
       return;
     }
     setBusyId(f.id);
-    await triggerDownload(f.url, baseFilename(f.ext, `-${f.id}`));
+    const saved = await triggerDownload(f.url, baseFilename(f.ext, `-${f.id}`));
     setBusyId(null);
-    markDone(f.id);
+    if (saved) {
+      markDone(f.id);
+    } else {
+      // Le fichier n'a pas pu être enregistré directement :
+      // il s'est ouvert dans un onglet pour être sauvegardé manuellement.
+      showToast(t.box.openFallback);
+    }
   }
 
   async function handleImageDownload(imgUrl: string, index: number) {
     const id = `img-${index}`;
     setBusyId(id);
-    await triggerDownload(imgUrl, baseFilename("jpg", `-photo-${index + 1}`));
+    const saved = await triggerDownload(imgUrl, baseFilename("jpg", `-photo-${index + 1}`));
     setBusyId(null);
-    markDone(id);
+    if (saved) {
+      markDone(id);
+    } else {
+      showToast(t.box.openFallback);
+    }
   }
 
   async function handleDownloadAll() {
     if (!result?.images || allBusy) return;
     setAllBusy(true);
+    let fallbackCount = 0;
     for (let i = 0; i < result.images.length; i++) {
       setBusyId(`img-${i}`);
-      await triggerDownload(result.images[i], baseFilename("jpg", `-photo-${i + 1}`));
-      markDone(`img-${i}`);
+      const saved = await triggerDownload(result.images[i], baseFilename("jpg", `-photo-${i + 1}`));
+      if (saved) {
+        markDone(`img-${i}`);
+      } else {
+        fallbackCount++;
+      }
       setBusyId(null);
       await new Promise((r) => setTimeout(r, 600));
     }
     setAllBusy(false);
+    if (fallbackCount > 0) showToast(t.box.openFallback);
   }
 
   function reset() {
@@ -500,9 +520,9 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
       </ul>
 
       {/* Toast */}
-      {toast && (
-        <div className="anim-in fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-ink px-5 py-3 text-sm font-medium text-white shadow-lift">
-          {t.box.demoToast}
+      {toastMsg && (
+        <div className="anim-in fixed bottom-6 left-1/2 z-50 -translate-x-1/2 max-w-[92vw] rounded-xl bg-ink px-5 py-3 text-center text-sm font-medium text-white shadow-lift">
+          {toastMsg}
         </div>
       )}
     </div>

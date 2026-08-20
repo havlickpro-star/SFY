@@ -141,6 +141,7 @@ const en: Dict = {
     downloaded: "Downloaded",
     downloadAll: "Download all",
     photosHeader: "Available photos",
+    openFallback: "Opened in a new tab — save the file from the player.",
   },
 
   trust: ["No sign-up", "Mobile friendly", "Fast"],
