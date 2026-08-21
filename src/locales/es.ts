@@ -19,7 +19,7 @@ const es: Dict = {
     h1a: "Descargador de",
     h1b: "vídeos de TikTok",
     subtitle:
-      "Descarga o guarda las opciones disponibles de un vídeo público de TikTok directamente desde tu navegador.",
+      "Descarga o guarda vídeos públicos de TikTok, Instagram, Facebook y YouTube directamente desde tu navegador.",
     formatsTitle: "Todo lo que SFY puede guardar por ti",
     formatsSub: "Un enlace entra, varias opciones limpias salen. SFY solo muestra lo que existe de verdad.",
     formats: [
@@ -59,10 +59,12 @@ const es: Dict = {
     cta: "Descargar",
     paste: "Pegar",
     pasteHint: "Portapapeles no disponible — toca el campo y usa Ctrl+V o «Pegar».",
+    chooseApp: "Elige la app",
+    pasteTheLink: "Pega el enlace público",
     analyzing: "Analizando el vídeo…",
     fetching: "Obteniendo las opciones disponibles…",
     errEmpty: "Pega primero un enlace de TikTok.",
-    errInvalid: "Ese enlace de TikTok no parece válido.",
+    errInvalid: "Ese enlace no es compatible. SFY funciona con TikTok, Instagram, Facebook y YouTube.",
     errInaccessible: "No pudimos acceder a este contenido. Comprueba que sea público y siga disponible.",
     errGeneral: "Se produjo un error. Inténtalo de nuevo.",
     errRate: "Demasiadas solicitudes en poco tiempo. Inténtalo en unos instantes.",
@@ -89,7 +91,8 @@ const es: Dict = {
     downloaded: "Descargado",
     downloadAll: "Descargar todo",
     photosHeader: "Fotos disponibles",
-    openFallback: "Archivo abierto en una pestaña nueva — guárdalo desde el reproductor.",
+    openFallback: "No se pudo guardar el archivo automáticamente en este dispositivo.",
+    openFile: "Abrir el archivo",
   },
 
   trust: ["Sin registro", "Compatible con móvil", "Rápido"],

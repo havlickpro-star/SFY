@@ -243,6 +243,42 @@ export function IconRotate(p: P) {
   );
 }
 
+export function IconTikTok(p: P) {
+  return (
+    <svg {...base(p)}>
+      <path d="M13.5 4v9.8a3.6 3.6 0 1 1-3.6-3.6" />
+      <path d="M13.5 5.2c.6 2.4 2.3 3.9 4.9 4.1" />
+    </svg>
+  );
+}
+
+export function IconInstagram(p: P) {
+  return (
+    <svg {...base(p)}>
+      <rect x="4" y="4" width="16" height="16" rx="4.5" />
+      <circle cx="12" cy="12" r="3.6" />
+      <circle cx="16.6" cy="7.4" r="0.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function IconFacebook(p: P) {
+  return (
+    <svg {...base(p)}>
+      <path d="M14.5 8H16V5.2h-1.9c-2 0-3.2 1.3-3.2 3.4V11H9v2.8h1.9v6h3v-6h2.3l.5-2.8h-2.8V9c0-.7.3-1 .6-1Z" />
+    </svg>
+  );
+}
+
+export function IconYouTube(p: P) {
+  return (
+    <svg {...base(p)}>
+      <rect x="3.5" y="6" width="17" height="12.5" rx="3.4" />
+      <path d="m10.4 9.6 4.4 2.65-4.4 2.65V9.6Z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function IconFilm(p: P) {
   return (
     <svg {...base(p)}>

@@ -19,7 +19,7 @@ const en: Dict = {
     h1a: "TikTok Video",
     h1b: "Downloader",
     subtitle:
-      "Download or save the available options of a public TikTok video — right from your browser.",
+      "Download or save public videos from TikTok, Instagram, Facebook and YouTube — right from your browser.",
     formatsTitle: "Everything SFY can save for you",
     formatsSub:
       "One link in, several clean options out. SFY only shows what is actually available.",
@@ -109,10 +109,12 @@ const en: Dict = {
     cta: "Download",
     paste: "Paste",
     pasteHint: "Clipboard unavailable — tap the field and use Ctrl+V / long-press Paste.",
+    chooseApp: "Choose the app",
+    pasteTheLink: "Paste the public link",
     analyzing: "Analyzing the video…",
     fetching: "Fetching available options…",
     errEmpty: "Paste a TikTok link first.",
-    errInvalid: "That doesn't look like a valid TikTok link.",
+    errInvalid: "That link isn't supported. SFY works with TikTok, Instagram, Facebook and YouTube.",
     errInaccessible:
       "We couldn't access this content. Check that it's public and still available.",
     errGeneral: "Something went wrong. Please try again.",
@@ -141,7 +143,8 @@ const en: Dict = {
     downloaded: "Downloaded",
     downloadAll: "Download all",
     photosHeader: "Available photos",
-    openFallback: "Opened in a new tab — save the file from the player.",
+    openFallback: "The file couldn't be saved automatically on this device.",
+    openFile: "Open the file",
   },
 
   trust: ["No sign-up", "Mobile friendly", "Fast"],

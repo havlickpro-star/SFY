@@ -19,7 +19,7 @@ const id: Dict = {
     h1a: "Downloader",
     h1b: "Video TikTok",
     subtitle:
-      "Unduh atau simpan opsi yang tersedia dari video TikTok publik langsung dari browser Anda.",
+      "Unduh atau simpan video publik TikTok, Instagram, Facebook, dan YouTube langsung dari browser Anda.",
     formatsTitle: "Semua yang bisa SFY simpan untuk Anda",
     formatsSub: "Satu tautan masuk, beberapa opsi bersih keluar. SFY hanya menampilkan yang benar-benar tersedia.",
     formats: [
@@ -59,10 +59,12 @@ const id: Dict = {
     cta: "Unduh",
     paste: "Tempel",
     pasteHint: "Clipboard tidak tersedia — ketuk kolom lalu gunakan Ctrl+V atau tekan lama “Tempel”.",
+    chooseApp: "Pilih aplikasi",
+    pasteTheLink: "Tempel tautan publik",
     analyzing: "Menganalisis video…",
     fetching: "Mengambil opsi yang tersedia…",
     errEmpty: "Tempel tautan TikTok terlebih dahulu.",
-    errInvalid: "Tautan TikTok ini sepertinya tidak valid.",
+    errInvalid: "Tautan itu tidak didukung. SFY mendukung TikTok, Instagram, Facebook, dan YouTube.",
     errInaccessible: "Kami tidak dapat mengakses konten ini. Pastikan kontennya publik dan masih tersedia.",
     errGeneral: "Terjadi kesalahan. Silakan coba lagi.",
     errRate: "Terlalu banyak permintaan dalam waktu singkat. Coba lagi sebentar lagi.",
@@ -89,7 +91,8 @@ const id: Dict = {
     downloaded: "Terunduh",
     downloadAll: "Unduh semua",
     photosHeader: "Foto tersedia",
-    openFallback: "File dibuka di tab baru — simpan dari pemutar.",
+    openFallback: "File tidak dapat disimpan otomatis di perangkat ini.",
+    openFile: "Buka file",
   },
 
   trust: ["Tanpa daftar", "Ramah mobile", "Cepat"],

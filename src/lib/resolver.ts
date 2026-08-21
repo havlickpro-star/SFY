@@ -1,19 +1,24 @@
 /* ================================================================== */
-/*  SFY — MediaResolver                                               */
+/*  SFY — MediaResolver (multi-plateformes)                           */
 /*  Facade interne appelée par le frontend (concept : POST /api/resolve).
 /*                                                                    */
-/*  Architecture choisie : résolution via le service public d'extraction
-/*  TikWM (gratuit, sans clé API, CORS ouvert) + téléchargement direct
-/*  des fichiers média côté navigateur (fetch → blob → download, avec
-/*  repli vers l'ouverture du lien). Aucun contournement de protection :
-/*  seul le contenu public est résolu, et si l'extraction échoue, SFY
-/*  renvoie une erreur claire — jamais de faux résultat.              */
+/*  Moteurs :                                                         */
+/*  · TikTok    → TikWM (public, sans clé) + repli Cobalt             */
+/*  · YouTube   → instances communautaires Cobalt (sans clé, CORS)    */
+/*  · Instagram → Cobalt (reels, posts, carrousels)                   */
+/*  · Facebook  → SnapSave / GetFVid (endpoints publics)              */
+/*  · Métadonnées → noembed (public) + miniatures YouTube natives     */
 /*                                                                    */
-/*  MOCK_MODE = true → données simulées pour le développement de l'UI
-/*  (clairement signalées « Démo » dans l'interface). false en prod.  */
+/*  Téléchargement : les octets sont récupérés puis enregistrés sur   */
+/*  l'appareil (fetch → blob → <a download>), avec course parallèle   */
+/*  via plusieurs relais CORS. Aucun contournement de protection :    */
+/*  seul le contenu public est résolu ; sinon, erreur claire.         */
+/*                                                                    */
+/*  MOCK_MODE = true → données simulées pour le développement de l'UI */
+/*  (signalées « Démo » dans l'interface). false en production.       */
 /* ================================================================== */
 
-import type { ToolMode } from "./i18n";
+import type { ToolMode, Platform } from "./i18n";
 
 const MOCK_MODE = false; // ← true uniquement pour développer l'interface
 
@@ -22,18 +27,13 @@ export const RATE_LIMIT = {
   windowMs: 60_000, // …par fenêtre glissante (modifiable)
 };
 
-/* Domains TikTok autorisés (allowlist stricte — aucune URL arbitraire). */
-const ALLOWED_HOSTS = [
-  "tiktok.com",
-  "www.tiktok.com",
-  "m.tiktok.com",
-  "vm.tiktok.com",
-  "vt.tiktok.com",
-];
-
-/* Service public d'extraction (pas de clé, CORS ouvert). */
-const EXTRACT_API = "https://www.tikwm.com/api/";
-const EXTRACT_TIMEOUT_MS = 18_000;
+/* Allowlists strictes par plateforme — aucune URL arbitraire. */
+const PLATFORM_HOSTS: Record<Platform, string[]> = {
+  tiktok: ["tiktok.com", "www.tiktok.com", "m.tiktok.com", "vm.tiktok.com", "vt.tiktok.com"],
+  youtube: ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"],
+  instagram: ["instagram.com", "www.instagram.com"],
+  facebook: ["facebook.com", "www.facebook.com", "m.facebook.com", "web.facebook.com", "fb.watch"],
+};
 
 export type ErrorCode = "empty" | "invalid" | "inaccessible" | "rate" | "error";
 export type FormatLabelKey =
@@ -54,11 +54,12 @@ export interface MediaFormat {
   tag?: "noWatermark";
   primary?: boolean;
   url?: string; // lien média réel quand disponible
+  suggestedName?: string;
 }
 
 export interface ResolvedMedia {
   demo: boolean;
-  platform: "tiktok";
+  platform: Platform;
   sourceUrl: string;
   id?: string;
   title: string;
@@ -67,7 +68,7 @@ export interface ResolvedMedia {
   authorUrl?: string;
   thumbnail?: string;
   durationSec?: number;
-  images?: string[]; // diapositives (posts photo / carrousels)
+  images?: string[]; // diapositives (carrousels)
   formats: MediaFormat[];
 }
 
@@ -76,8 +77,7 @@ export type ResolveResult =
   | { ok: false; code: ErrorCode };
 
 /* ------------------------------------------------------------------ */
-/* Validation & sécurité (anti-SSRF côté client + re-validation côté   */
-/* serveur recommandée si un backend propre est ajouté)                */
+/* Validation & sécurité (anti-SSRF côté client)                       */
 /* ------------------------------------------------------------------ */
 
 function isPrivateHost(host: string): boolean {
@@ -92,9 +92,16 @@ function isPrivateHost(host: string): boolean {
   return false;
 }
 
-export function validateTikTokUrl(
+export function detectPlatform(host: string): Platform | null {
+  for (const p of Object.keys(PLATFORM_HOSTS) as Platform[]) {
+    if (PLATFORM_HOSTS[p].includes(host)) return p;
+  }
+  return null;
+}
+
+export function validateMediaUrl(
   input: string
-): { ok: true; url: string } | { ok: false; code: ErrorCode } {
+): { ok: true; url: string; platform: Platform } | { ok: false; code: ErrorCode } {
   const raw = input.trim();
   if (!raw) return { ok: false, code: "empty" };
 
@@ -105,21 +112,26 @@ export function validateTikTokUrl(
     return { ok: false, code: "invalid" };
   }
 
-  // Schémas dangereux refusés (seuls http/https passent).
   if (u.protocol !== "https:" && u.protocol !== "http:") {
     return { ok: false, code: "invalid" };
   }
 
   const host = u.hostname.toLowerCase();
   if (isPrivateHost(host)) return { ok: false, code: "invalid" };
-  if (!ALLOWED_HOSTS.includes(host)) return { ok: false, code: "invalid" };
 
-  return { ok: true, url: u.href };
+  const platform = detectPlatform(host);
+  if (!platform) return { ok: false, code: "invalid" };
+
+  return { ok: true, url: u.href, platform };
+}
+
+/* Compatibilité ancien nom. */
+export function validateTikTokUrl(input: string) {
+  return validateMediaUrl(input);
 }
 
 /* ------------------------------------------------------------------ */
-/* Rate limiting (fenêtre glissante — à déplacer côté serveur si un    */
-/* backend propre est ajouté)                                          */
+/* Rate limiting (fenêtre glissante)                                   */
 /* ------------------------------------------------------------------ */
 
 const RL_KEY = "sfy:rate";
@@ -140,8 +152,10 @@ function hitRateLimit(): { limited: boolean } {
 }
 
 /* ------------------------------------------------------------------ */
-/* Extraction réelle (TikWM — service public, sans clé, CORS ouvert)   */
+/* Moteur TikTok — TikWM (public, sans clé, CORS)                      */
 /* ------------------------------------------------------------------ */
+
+const TIKWM_API = "https://www.tikwm.com/api/";
 
 interface TikwmData {
   id?: string;
@@ -162,12 +176,9 @@ interface TikwmData {
 
 async function fetchTikwm(url: string): Promise<TikwmData | null> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), EXTRACT_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), 18_000);
   try {
-    const res = await fetch(
-      `${EXTRACT_API}?url=${encodeURIComponent(url)}&hd=1`,
-      { signal: ctrl.signal }
-    );
+    const res = await fetch(`${TIKWM_API}?url=${encodeURIComponent(url)}&hd=1`, { signal: ctrl.signal });
     if (!res.ok) return null;
     const j = (await res.json()) as { code?: number; data?: TikwmData };
     if (!j || j.code !== 0 || !j.data) return null;
@@ -179,13 +190,11 @@ async function fetchTikwm(url: string): Promise<TikwmData | null> {
   }
 }
 
-function toResolved(d: TikwmData, sourceUrl: string, mode: ToolMode): ResolvedMedia {
+function tikwmToResolved(d: TikwmData, sourceUrl: string, mode: ToolMode): ResolvedMedia {
   const authorId = d.author?.unique_id ?? "";
   const author = d.author?.nickname || (authorId ? `@${authorId}` : "");
   const images =
-    Array.isArray(d.images) && d.images.length
-      ? d.images.map(normalizeMediaUrl)
-      : undefined;
+    Array.isArray(d.images) && d.images.length ? d.images.map(normalizeMediaUrl) : undefined;
 
   const videoFormats: MediaFormat[] = [];
   const hd = typeof d.hdplay === "string" ? d.hdplay.trim() : "";
@@ -195,29 +204,20 @@ function toResolved(d: TikwmData, sourceUrl: string, mode: ToolMode): ResolvedMe
   if (hd) {
     videoFormats.push({
       id: "hd", kind: "video", labelKey: "bestQuality", ext: "MP4",
-      quality: "HD", sizeBytes: d.hd_size, tag: "noWatermark", primary: true,
-      url: normalizeMediaUrl(hd),
+      quality: "HD", sizeBytes: d.hd_size, tag: "noWatermark", primary: true, url: hd,
     });
   }
   if (play) {
     videoFormats.push({
-      id: "no-wm", kind: "video",
-      labelKey: hd ? "mp4hd" : "bestQuality", ext: "MP4",
-      quality: hd ? "HD" : undefined, sizeBytes: d.size, tag: "noWatermark",
-      primary: !hd, url: normalizeMediaUrl(play),
+      id: "no-wm", kind: "video", labelKey: hd ? "mp4hd" : "bestQuality", ext: "MP4",
+      sizeBytes: d.size, tag: "noWatermark", primary: !hd, url: play,
     });
   }
   if (wm) {
-    videoFormats.push({
-      id: "wm", kind: "video", labelKey: "mp4std", ext: "MP4",
-      sizeBytes: d.wm_size, url: normalizeMediaUrl(wm),
-    });
+    videoFormats.push({ id: "wm", kind: "video", labelKey: "mp4std", ext: "MP4", sizeBytes: d.wm_size, url: wm });
   }
   if (typeof d.music === "string" && d.music.trim()) {
-    videoFormats.push({
-      id: "mp3", kind: "audio", labelKey: "mp3", ext: "MP3",
-      quality: "128 kbps", url: normalizeMediaUrl(d.music.trim()),
-    });
+    videoFormats.push({ id: "mp3", kind: "audio", labelKey: "mp3", ext: "MP3", quality: "128 kbps", url: d.music.trim() });
   }
 
   let formats: MediaFormat[];
@@ -231,18 +231,290 @@ function toResolved(d: TikwmData, sourceUrl: string, mode: ToolMode): ResolvedMe
   }
 
   return {
-    demo: false,
-    platform: "tiktok",
-    sourceUrl,
-    id: d.id,
-    title: d.title ?? "",
-    author,
-    authorId,
+    demo: false, platform: "tiktok", sourceUrl,
+    id: d.id, title: d.title ?? "", author, authorId,
     authorUrl: authorId ? `https://www.tiktok.com/@${authorId}` : undefined,
     thumbnail: d.origin_cover || d.cover || undefined,
     durationSec: typeof d.duration === "number" && d.duration > 0 ? d.duration : undefined,
-    images,
-    formats,
+    images, formats,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Moteur Cobalt — YouTube / Instagram / repli TikTok                  */
+/* (instances communautaires publiques, sans clé)                      */
+/* ------------------------------------------------------------------ */
+
+const COBALT_LIST_URL = "https://instances.cobalt.best/api/instances.json";
+const COBALT_BOOTSTRAP = [
+  "https://cobalt-api.meowing.de",
+  "https://cobalt-api.kwiatekmiki.com",
+  "https://capi.oak.li",
+  "https://api.dl.ihate.college",
+];
+
+let cobaltInstancesCache: Promise<string[]> | null = null;
+
+function getCobaltInstances(): Promise<string[]> {
+  cobaltInstancesCache ??= (async () => {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(COBALT_LIST_URL, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) return COBALT_BOOTSTRAP;
+      const j = (await res.json()) as { instances?: unknown[] } | unknown[];
+      const list = Array.isArray(j) ? j : j.instances ?? [];
+      const found: { url: string; score: number }[] = [];
+      for (const it of list as Record<string, unknown>[]) {
+        const api = it.api as Record<string, unknown> | string | undefined;
+        const url =
+          typeof api === "string" ? api
+          : typeof (api as Record<string, unknown> | undefined)?.url === "string"
+            ? ((api as Record<string, string>).url)
+            : typeof it.url === "string" ? (it.url as string) : null;
+        if (!url || !url.startsWith("http")) continue;
+        if (api && typeof api === "object") {
+          if ((api as Record<string, unknown>).auth) continue; // clé requise → inutile ici
+          if ((api as Record<string, unknown>).cors === false) continue;
+        }
+        found.push({ url: url.replace(/\/+$/, ""), score: typeof it.score === "number" ? it.score : 0 });
+      }
+      found.sort((a, b) => b.score - a.score);
+      return found.length ? found.slice(0, 10).map((f) => f.url) : COBALT_BOOTSTRAP;
+    } catch {
+      return COBALT_BOOTSTRAP;
+    }
+  })();
+  return cobaltInstancesCache;
+}
+
+type CobaltOk =
+  | { status: "tunnel" | "redirect"; url: string; filename?: string }
+  | { status: "picker"; picker: { type?: string; url?: string; thumb?: string }[]; audio?: string };
+
+async function cobaltRequest(instance: string, body: object, timeoutMs: number): Promise<CobaltOk | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${instance}/`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { status?: string };
+    if (j && (j.status === "tunnel" || j.status === "redirect" || j.status === "picker")) {
+      return j as CobaltOk;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Lance la requête sur toutes les instances en parallèle — la première qui répond gagne. */
+function raceCobalt(instances: string[], body: object): Promise<CobaltOk | null> {
+  return new Promise((resolve) => {
+    let pending = instances.length;
+    let settled = false;
+    if (!pending) return resolve(null);
+    for (const inst of instances) {
+      cobaltRequest(inst, body, 25_000).then((r) => {
+        if (settled) return;
+        if (r) {
+          settled = true;
+          resolve(r);
+        } else if (--pending === 0) {
+          settled = true;
+          resolve(null);
+        }
+      });
+    }
+  });
+}
+
+/* Métadonnées publiques (titre, auteur, miniature) — pas de clé requise. */
+interface MediaMeta { title?: string; author?: string; authorUrl?: string; thumbnail?: string; }
+
+async function fetchNoembed(url: string): Promise<MediaMeta> {
+  try {
+    const res = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`);
+    if (!res.ok) return {};
+    const j = (await res.json()) as Record<string, unknown>;
+    if (!j || j.error) return {};
+    return {
+      title: typeof j.title === "string" ? j.title : undefined,
+      author: typeof j.author_name === "string" ? j.author_name : undefined,
+      authorUrl: typeof j.author_url === "string" ? j.author_url : undefined,
+      thumbnail: typeof j.thumbnail_url === "string" ? j.thumbnail_url : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function youtubeId(u: URL): string | null {
+  if (u.hostname === "youtu.be") return u.pathname.slice(1).split("/")[0] || null;
+  const v = u.searchParams.get("v");
+  if (v) return v;
+  const m = u.pathname.match(/\/(shorts|embed|live|video)\/([\w-]{6,})/);
+  return m ? m[2] : null;
+}
+
+function cobaltToFormats(res: CobaltOk | null, platform: Platform): {
+  formats: MediaFormat[];
+  images?: string[];
+} {
+  const formats: MediaFormat[] = [];
+  let images: string[] | undefined;
+  if (!res) return { formats };
+
+  if ((res.status === "tunnel" || res.status === "redirect") && res.url) {
+    formats.push({
+      id: "best", kind: "video", labelKey: "bestQuality", ext: "MP4",
+      quality: platform === "youtube" ? "1080p" : undefined,
+      tag: platform === "tiktok" ? "noWatermark" : undefined,
+      primary: true, url: res.url, suggestedName: res.filename,
+    });
+  } else if (res.status === "picker" && Array.isArray(res.picker)) {
+    const items = res.picker.filter((p) => typeof p.url === "string" && p.url);
+    const photos = items.filter((p) => p.type !== "video" && p.type !== "gif");
+    const videos = items.filter((p) => p.type === "video" || p.type === "gif");
+    if (photos.length) images = photos.map((p) => normalizeMediaUrl(p.url!));
+    if (!images?.length && videos.length) {
+      formats.push({
+        id: "best", kind: "video", labelKey: "bestQuality", ext: "MP4",
+        primary: true, url: videos[0].url, suggestedName: undefined,
+      });
+    }
+  }
+  return { formats, images };
+}
+
+async function resolveViaCobalt(
+  url: string,
+  platform: Platform,
+  mode: ToolMode,
+  onStage: (s: "analyzing" | "fetching") => void
+): Promise<ResolveResult> {
+  onStage("analyzing");
+  const instances = await getCobaltInstances();
+  onStage("fetching");
+
+  const videoBody = { url, videoQuality: "1080", filenameStyle: "pretty" };
+  const audioBody = { url, downloadMode: "audio", audioFormat: "mp3", audioBitrate: "128", filenameStyle: "pretty" };
+
+  const [videoRes, audioRes, meta] = await Promise.all([
+    mode === "photo" ? Promise.resolve(null) : raceCobalt(instances, videoBody),
+    mode === "video" || mode === "mp3" ? raceCobalt(instances, audioBody) : Promise.resolve(null),
+    fetchNoembed(url),
+  ]);
+
+  const videoPart = cobaltToFormats(videoRes, platform);
+  const audioPart = cobaltToFormats(audioRes, platform);
+
+  let formats: MediaFormat[];
+  if (mode === "mp3") {
+    const mp3 = audioPart.formats[0];
+    formats = mp3 ? [{ ...mp3, labelKey: "mp3", ext: "MP3", quality: "128 kbps", kind: "audio" }] : [];
+  } else if (mode === "photo" && videoPart.images?.length) {
+    formats = [{ id: "photos", kind: "image", labelKey: "photos", ext: "JPG", primary: true }];
+  } else {
+    formats = [...videoPart.formats];
+    if (audioPart.formats[0]) {
+      formats.push({ ...audioPart.formats[0], labelKey: "mp3", ext: "MP3", quality: "128 kbps", kind: "audio", primary: false });
+    }
+  }
+
+  let thumbnail = meta.thumbnail;
+  if (!thumbnail && platform === "youtube") {
+    try {
+      const id = youtubeId(new URL(url));
+      if (id) thumbnail = `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+    } catch { /* ignore */ }
+  }
+
+  if (!formats.length && !videoPart.images?.length) return { ok: false, code: "inaccessible" };
+
+  return {
+    ok: true,
+    data: {
+      demo: false, platform, sourceUrl: url,
+      title: meta.title ?? "", author: meta.author ?? "", authorUrl: meta.authorUrl,
+      thumbnail, images: videoPart.images, formats,
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Moteur Facebook — endpoints publics SnapSave / GetFVid              */
+/* ------------------------------------------------------------------ */
+
+async function fetchFacebookHtml(url: string): Promise<string | null> {
+  const endpoints = [
+    "https://snapsave.app/action.php?lang=en",
+    "https://www.getfvid.com/downloader",
+  ];
+  for (const endpoint of endpoints) {
+    const targets = [
+      endpoint,
+      `https://corsproxy.io/?url=${encodeURIComponent(endpoint)}`,
+    ];
+    for (const target of targets) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 20_000);
+      try {
+        const res = await fetch(target, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: `url=${encodeURIComponent(url)}`,
+          signal: ctrl.signal,
+        });
+        if (!res.ok) continue;
+        const j = (await res.json()) as { data?: unknown };
+        const data = typeof j?.data === "string" ? j.data : null;
+        if (data && data.includes("http")) return data;
+      } catch { /* endpoint suivant */ } finally {
+        clearTimeout(timer);
+      }
+    }
+  }
+  return null;
+}
+
+async function resolveFacebook(
+  url: string,
+  onStage: (s: "analyzing" | "fetching") => void
+): Promise<ResolveResult> {
+  onStage("analyzing");
+  const html = await fetchFacebookHtml(url);
+  onStage("fetching");
+  if (!html) return { ok: false, code: "inaccessible" };
+
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const links = Array.from(doc.querySelectorAll("a[href]"))
+    .map((a) => a.getAttribute("href") || "")
+    .filter((h) => /^https?:\/\/[^\s"']+\.(mp4|m4v)([?#][^\s"']*)?$/i.test(h));
+  const uniq = [...new Set(links)].slice(0, 3);
+  const thumbnail = doc.querySelector("img")?.getAttribute("src") || undefined;
+  const title =
+    doc.querySelector("p")?.textContent?.trim().slice(0, 140) || "";
+
+  if (!uniq.length && !thumbnail) return { ok: false, code: "inaccessible" };
+
+  const formats: MediaFormat[] = uniq.map((u, i) => ({
+    id: `fb-${i}`, kind: "video",
+    labelKey: i === 0 ? "bestQuality" : i === 1 ? "mp4hd" : "mp4std",
+    ext: "MP4", primary: i === 0, url: u,
+  }));
+
+  return {
+    ok: true,
+    data: { demo: false, platform: "facebook", sourceUrl: url, title, author: "", thumbnail, formats },
   };
 }
 
@@ -265,7 +537,7 @@ function demoFormats(mode: ToolMode): MediaFormat[] {
 }
 
 /* ------------------------------------------------------------------ */
-/* Résolution                                                          */
+/* Résolution (dispatch par plateforme)                                */
 /* ------------------------------------------------------------------ */
 
 export async function resolveMedia(
@@ -273,7 +545,7 @@ export async function resolveMedia(
   mode: ToolMode,
   onStage: (stage: "analyzing" | "fetching") => void
 ): Promise<ResolveResult> {
-  const validation = validateTikTokUrl(input);
+  const validation = validateMediaUrl(input);
   if (!validation.ok) return { ok: false, code: validation.code };
 
   if (hitRateLimit().limited) return { ok: false, code: "rate" };
@@ -287,48 +559,46 @@ export async function resolveMedia(
     return {
       ok: true,
       data: {
-        demo: true,
-        platform: "tiktok",
-        sourceUrl: validation.url,
-        title: "",
-        author: "",
-        durationSec: 21,
-        formats: demoFormats(mode),
+        demo: true, platform: validation.platform, sourceUrl: validation.url,
+        title: "", author: "", durationSec: 21, formats: demoFormats(mode),
       },
     };
   }
 
-  /* Extraction réelle — deux phases perceptibles pour l'utilisateur. */
-  const stageTimer = setTimeout(() => onStage("fetching"), 1600);
-  const data = await fetchTikwm(validation.url);
-  clearTimeout(stageTimer);
+  const { url, platform } = validation;
 
-  if (!data) return { ok: false, code: "inaccessible" };
-
-  const resolved = toResolved(data, validation.url, mode);
-  if (resolved.formats.length === 0 && !resolved.images) {
-    return { ok: false, code: "inaccessible" };
+  if (platform === "tiktok") {
+    const data = await fetchTikwm(url);
+    if (data) {
+      const resolved = tikwmToResolved(data, url, mode);
+      if (resolved.formats.length || resolved.images?.length) {
+        return { ok: true, data: resolved };
+      }
+    }
+    // Repli : moteur Cobalt pour TikTok.
+    return resolveViaCobalt(url, "tiktok", mode === "story" ? "video" : mode, onStage);
   }
-  return { ok: true, data: resolved };
+
+  if (platform === "facebook") return resolveFacebook(url, onStage);
+
+  // YouTube / Instagram (+ TikTok en repli ci-dessus)
+  return resolveViaCobalt(url, platform, mode, onStage);
 }
 
 /* ------------------------------------------------------------------ */
-/* Téléchargement côté navigateur                                      */
+/* Téléchargement côté navigateur — enregistrement local               */
 /* ------------------------------------------------------------------ */
 
-/* Le service d'extraction renvoie parfois des chemins relatifs
-   (« /api/media/video?id=… ») : on les rattache à son domaine.        */
+/* Chemins relatifs (« /api/media/video?id=… ») rattachés à leur domaine. */
 export function normalizeMediaUrl(url: string): string {
   if (url.startsWith("/")) return `https://www.tikwm.com${url}`;
   return url;
 }
 
-/* Proxies CORS publics : les CDN vidéo (TikTok notamment) ne renvoient
-   pas toujours les en-têtes CORS — le proxy permet de récupérer les
-   octets pour les enregistrer en fichier local.                        */
 const CORS_PROXIES: ((u: string) => string)[] = [
   (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   (u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+  (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
 ];
 
 async function fetchBlob(url: string, timeoutMs: number): Promise<Blob | null> {
@@ -339,14 +609,30 @@ async function fetchBlob(url: string, timeoutMs: number): Promise<Blob | null> {
     if (!res.ok) return null;
     const blob = await res.blob();
     if (!blob || blob.size === 0) return null;
-    // Une petite page HTML = page d'erreur, pas un média.
     if (blob.type.startsWith("text/html") && blob.size < 8192) return null;
+    if (blob.type === "application/json" && blob.size < 8192) return null;
     return blob;
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Plusieurs URLs lancées en parallèle — la première qui répond gagne (réseau mobile). */
+function raceBlobs(urls: string[], timeoutMs: number): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    let pending = urls.length;
+    let settled = false;
+    if (!pending) return resolve(null);
+    for (const u of urls) {
+      fetchBlob(u, timeoutMs).then((b) => {
+        if (settled) return;
+        if (b) { settled = true; resolve(b); }
+        else if (--pending === 0) { settled = true; resolve(null); }
+      });
+    }
+  });
 }
 
 function saveBlob(blob: Blob, filename: string): boolean {
@@ -368,24 +654,16 @@ function saveBlob(blob: Blob, filename: string): boolean {
 
 /**
  * Enregistre le média comme fichier sur l'appareil.
- * Stratégie : 1) fetch direct (si l'hôte autorise CORS)
- *             2) fetch via proxy CORS → blob → enregistrement
- *             3) dernier recours : ouverture du lien dans un onglet.
- * Retourne true si le fichier a été enregistré par le navigateur.
+ * fetch direct → course parallèle de relais CORS → blob → <a download>.
+ * N'ouvre JAMAIS d'onglet automatiquement.
  */
 export async function triggerDownload(rawUrl: string, filename: string): Promise<boolean> {
   const url = normalizeMediaUrl(rawUrl);
 
-  let blob = await fetchBlob(url, 40_000);
-  for (const proxy of CORS_PROXIES) {
-    if (blob) break;
-    blob = await fetchBlob(proxy(url), 80_000);
-  }
+  let blob = await fetchBlob(url, 20_000);
+  if (!blob) blob = await raceBlobs(CORS_PROXIES.map((p) => p(url)), 30_000);
 
   if (blob && saveBlob(blob, filename)) return true;
-
-  // Dernier recours : l'utilisateur enregistre depuis le lecteur.
-  window.open(url, "_blank", "noopener,noreferrer");
   return false;
 }
 
@@ -396,7 +674,7 @@ export function safeFilename(prefix: string, id: string | undefined, ext: string
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 48) || "tiktok";
+    .slice(0, 48) || "media";
   return `sfy-${base}${id ? `-${id}` : ""}.${ext.toLowerCase()}`;
 }
 
