@@ -59,6 +59,8 @@ const pt: Dict = {
     cta: "Baixar",
     paste: "Colar",
     pasteHint: "Área de transferência indisponível — toque no campo e use Ctrl+V ou “Colar”.",
+    chooseApp: "Escolha o app",
+    pasteTheLink: "Cole o link público",
     analyzing: "Analisando o vídeo…",
     fetching: "Buscando as opções disponíveis…",
     errEmpty: "Cole um link do TikTok primeiro.",

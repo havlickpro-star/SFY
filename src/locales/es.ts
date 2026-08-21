@@ -59,6 +59,8 @@ const es: Dict = {
     cta: "Descargar",
     paste: "Pegar",
     pasteHint: "Portapapeles no disponible — toca el campo y usa Ctrl+V o «Pegar».",
+    chooseApp: "Elige la app",
+    pasteTheLink: "Pega el enlace público",
     analyzing: "Analizando el vídeo…",
     fetching: "Obteniendo las opciones disponibles…",
     errEmpty: "Pega primero un enlace de TikTok.",

@@ -1,4 +1,6 @@
-import { useT, useLang, homePath, alternatesFor } from "../lib/i18n";
+import type { ReactElement } from "react";
+import { useT, useLang, homePath, alternatesFor, PLATFORMS, PLATFORM_LABELS } from "../lib/i18n";
+import type { Platform } from "../lib/i18n";
 import { SeoHead, SITE_URL, webAppJsonLd, faqJsonLd } from "../lib/seo";
 import DownloadBox from "../components/DownloadBox";
 import {
@@ -10,7 +12,23 @@ import {
   FormatsShowcase,
   CtaBand,
 } from "../components/Sections";
-import { IconFilm, IconMusic, IconPhoto, IconSpark } from "../components/Icons";
+import {
+  IconFilm,
+  IconMusic,
+  IconPhoto,
+  IconSpark,
+  IconTikTok,
+  IconFacebook,
+  IconInstagram,
+  IconYouTube,
+} from "../components/Icons";
+
+const PLATFORM_ICONS: Record<Platform, (p: { size?: number }) => ReactElement> = {
+  tiktok: (p) => <IconTikTok {...p} />,
+  facebook: (p) => <IconFacebook {...p} />,
+  instagram: (p) => <IconInstagram {...p} />,
+  youtube: (p) => <IconYouTube {...p} />,
+};
 
 const CHIPS = [
   { icon: IconFilm, label: "MP4 · 1080p", cls: "left-[4%] top-6", anim: "animate-float" },
@@ -102,6 +120,18 @@ export default function HomePage() {
                 );
               })}
               <DownloadBox mode="video" />
+            </div>
+          </Reveal>
+
+          {/* Plateformes prises en charge */}
+          <Reveal delay={340}>
+            <div className="mx-auto mt-7 flex max-w-xl flex-wrap items-center justify-center gap-x-6 gap-y-2">
+              {PLATFORMS.map((p) => (
+                <span key={p} className="flex items-center gap-1.5 text-[13px] font-semibold text-muted">
+                  <span className="text-brand">{PLATFORM_ICONS[p]({ size: 15 })}</span>
+                  {PLATFORM_LABELS[p]}
+                </span>
+              ))}
             </div>
           </Reveal>
         </div>

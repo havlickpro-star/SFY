@@ -109,6 +109,8 @@ const fr: Dict = {
     cta: "Télécharger",
     paste: "Coller",
     pasteHint: "Presse-papiers indisponible — touchez le champ puis utilisez Ctrl+V ou « Coller ».",
+    chooseApp: "Choisissez l'appli",
+    pasteTheLink: "Collez le lien public",
     analyzing: "Analyse de la vidéo…",
     fetching: "Récupération des options disponibles…",
     errEmpty: "Collez d'abord un lien TikTok.",

@@ -59,6 +59,8 @@ const id: Dict = {
     cta: "Unduh",
     paste: "Tempel",
     pasteHint: "Clipboard tidak tersedia — ketuk kolom lalu gunakan Ctrl+V atau tekan lama “Tempel”.",
+    chooseApp: "Pilih aplikasi",
+    pasteTheLink: "Tempel tautan publik",
     analyzing: "Menganalisis video…",
     fetching: "Mengambil opsi yang tersedia…",
     errEmpty: "Tempel tautan TikTok terlebih dahulu.",

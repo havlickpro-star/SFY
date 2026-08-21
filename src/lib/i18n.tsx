@@ -14,7 +14,7 @@ export type Lang = "en" | "fr" | "es" | "pt" | "id";
 export type ToolMode = "video" | "mp3" | "photo" | "story";
 export type Platform = "tiktok" | "instagram" | "facebook" | "youtube";
 
-export const PLATFORMS: Platform[] = ["tiktok", "instagram", "facebook", "youtube"];
+export const PLATFORMS: Platform[] = ["tiktok", "facebook", "instagram", "youtube"];
 
 /* Les placeholders sont des URLs — neutres en langue. */
 export const PLATFORM_PLACEHOLDERS: Record<Platform, string> = {
@@ -110,6 +110,8 @@ export interface Dict {
     cta: string;
     paste: string;
     pasteHint: string;
+    chooseApp: string;
+    pasteTheLink: string;
     analyzing: string;
     fetching: string;
     errEmpty: string;

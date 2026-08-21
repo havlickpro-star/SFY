@@ -234,37 +234,69 @@ export default function DownloadBox({
 
   const duration = result ? formatDuration(result.durationSec) : null;
   const showSlides = !!result?.images?.length;
-  const detectedPlatform: Platform = validity.ok ? validity.platform : activePlatform;
 
   return (
     <div className="relative">
       <div className="focus-ring rounded-[22px] border border-ink/8 bg-white p-5 shadow-soft transition-shadow duration-300 sm:p-7">
         {status !== "done" && (
           <form onSubmit={handleSubmit} noValidate>
-            {/* Plateformes prises en charge */}
-            <div className="mb-4 flex flex-wrap items-center gap-2">
-              {visiblePlatforms.map((p) => {
-                const active = detectedPlatform === p;
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setActivePlatform(p)}
-                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all duration-200 active:scale-95 ${
-                      active
-                        ? "grad-bg border-transparent text-white shadow-chip"
-                        : "border-ink/10 bg-mist text-muted hover:border-brand/40 hover:text-brand"
-                    }`}
-                  >
-                    {PLATFORM_ICON[p]({ size: 14 })}
-                    {PLATFORM_LABELS[p]}
-                  </button>
-                );
-              })}
-            </div>
+            {/* ===== Étape 1 — choix de l'appli ===== */}
+            {visiblePlatforms.length > 1 && (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="grad-bg font-display flex h-6 w-6 items-center justify-center rounded-lg text-xs font-bold text-white shadow-chip">
+                    1
+                  </span>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
+                    {t.box.chooseApp}
+                  </p>
+                </div>
+                <div
+                  className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-4"
+                  role="tablist"
+                  aria-label={t.box.chooseApp}
+                >
+                  {visiblePlatforms.map((p) => {
+                    const active = activePlatform === p;
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => {
+                          setActivePlatform(p);
+                          setError(null);
+                          window.setTimeout(() => inputRef.current?.focus(), 40);
+                        }}
+                        className={`group flex items-center justify-center gap-2 rounded-xl border px-2 py-3 text-[13px] font-semibold transition-all duration-200 active:scale-[0.97] ${
+                          active
+                            ? "grad-bg border-transparent text-white shadow-chip"
+                            : "border-ink/8 bg-mist text-muted hover:border-brand/40 hover:bg-tint/60 hover:text-brand"
+                        }`}
+                      >
+                        <span className={`transition-transform duration-200 ${active ? "" : "group-hover:scale-110"}`}>
+                          {PLATFORM_ICON[p]({ size: 16 })}
+                        </span>
+                        {PLATFORM_LABELS[p]}
+                      </button>
+                    );
+                  })}
+                </div>
 
-            <div className="flex flex-col gap-3 md:flex-row">
+                {/* ===== Étape 2 — coller le lien ===== */}
+                <div className="mt-5 flex items-center gap-2">
+                  <span className="grad-bg font-display flex h-6 w-6 items-center justify-center rounded-lg text-xs font-bold text-white shadow-chip">
+                    2
+                  </span>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
+                    {t.box.pasteTheLink}
+                  </p>
+                </div>
+              </>
+            )}
+
+            <div className={`${visiblePlatforms.length > 1 ? "mt-2.5" : ""} flex flex-col gap-3 md:flex-row`}>
               {/* Champ URL */}
               <div className="relative flex-1">
                 <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted">
@@ -278,7 +310,15 @@ export default function DownloadBox({
                   spellCheck={false}
                   value={url}
                   disabled={status === "working"}
-                  onChange={(e) => { setUrl(e.target.value); setError(null); }}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setUrl(val);
+                    setError(null);
+                    if (!platformLock) {
+                      const v = validateMediaUrl(val);
+                      if (v.ok) setActivePlatform(v.platform);
+                    }
+                  }}
                   placeholder={PLATFORM_PLACEHOLDERS[activePlatform]}
                   aria-label="URL"
                   className="h-14 w-full rounded-xl border border-ink/10 bg-mist pl-11 pr-11 text-[15px] font-medium text-ink outline-none transition-all placeholder:font-normal placeholder:text-muted/70 focus:border-brand/60 focus:bg-white focus:ring-4 focus:ring-brand/12 disabled:opacity-60"

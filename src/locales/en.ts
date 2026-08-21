@@ -109,6 +109,8 @@ const en: Dict = {
     cta: "Download",
     paste: "Paste",
     pasteHint: "Clipboard unavailable — tap the field and use Ctrl+V / long-press Paste.",
+    chooseApp: "Choose the app",
+    pasteTheLink: "Paste the public link",
     analyzing: "Analyzing the video…",
     fetching: "Fetching available options…",
     errEmpty: "Paste a TikTok link first.",
