@@ -89,7 +89,8 @@ const id: Dict = {
     downloaded: "Terunduh",
     downloadAll: "Unduh semua",
     photosHeader: "Foto tersedia",
-    openFallback: "File dibuka di tab baru — simpan dari pemutar.",
+    openFallback: "File tidak dapat disimpan otomatis di perangkat ini.",
+    openFile: "Buka file",
   },
 
   trust: ["Tanpa daftar", "Ramah mobile", "Cepat"],

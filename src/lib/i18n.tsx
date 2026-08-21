@@ -123,6 +123,7 @@ export interface Dict {
     downloadAll: string;
     photosHeader: string;
     openFallback: string;
+    openFile: string;
   };
   trust: string[];
   how: { title: string; steps: Step[] };

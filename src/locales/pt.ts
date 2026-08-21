@@ -89,7 +89,8 @@ const pt: Dict = {
     downloaded: "Baixado",
     downloadAll: "Baixar tudo",
     photosHeader: "Fotos disponíveis",
-    openFallback: "Arquivo aberto em uma nova aba — salve-o pelo player.",
+    openFallback: "Não foi possível salvar o arquivo automaticamente neste dispositivo.",
+    openFile: "Abrir o arquivo",
   },
 
   trust: ["Sem cadastro", "Funciona no celular", "Rápido"],

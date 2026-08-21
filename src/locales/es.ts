@@ -89,7 +89,8 @@ const es: Dict = {
     downloaded: "Descargado",
     downloadAll: "Descargar todo",
     photosHeader: "Fotos disponibles",
-    openFallback: "Archivo abierto en una pestaña nueva — guárdalo desde el reproductor.",
+    openFallback: "No se pudo guardar el archivo automáticamente en este dispositivo.",
+    openFile: "Abrir el archivo",
   },
 
   trust: ["Sin registro", "Compatible con móvil", "Rápido"],

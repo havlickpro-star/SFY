@@ -329,6 +329,7 @@ export function normalizeMediaUrl(url: string): string {
 const CORS_PROXIES: ((u: string) => string)[] = [
   (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   (u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+  (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
 ];
 
 async function fetchBlob(url: string, timeoutMs: number): Promise<Blob | null> {
@@ -339,14 +340,37 @@ async function fetchBlob(url: string, timeoutMs: number): Promise<Blob | null> {
     if (!res.ok) return null;
     const blob = await res.blob();
     if (!blob || blob.size === 0) return null;
-    // Une petite page HTML = page d'erreur, pas un média.
-    if (blob.type.startsWith("text/html") && blob.size < 8192) return null;
+    const type = blob.type.toLowerCase();
+    // Une page HTML ou une petite réponse JSON = page d'erreur, pas un média.
+    if (type.startsWith("text/")) return null;
+    if (type === "application/json" && blob.size < 200_000) return null;
     return blob;
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Lance toutes les tentatives en parallèle : le premier blob valide gagne. */
+function raceBlobs(urls: string[], timeoutMs: number): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    let pending = urls.length;
+    if (pending === 0) return resolve(null);
+    const cap = setTimeout(() => resolve(null), timeoutMs);
+    for (const u of urls) {
+      fetchBlob(u, timeoutMs).then((b) => {
+        pending--;
+        if (b) {
+          clearTimeout(cap);
+          resolve(b);
+        } else if (pending === 0) {
+          clearTimeout(cap);
+          resolve(null);
+        }
+      });
+    }
+  });
 }
 
 function saveBlob(blob: Blob, filename: string): boolean {
@@ -369,23 +393,23 @@ function saveBlob(blob: Blob, filename: string): boolean {
 /**
  * Enregistre le média comme fichier sur l'appareil.
  * Stratégie : 1) fetch direct (si l'hôte autorise CORS)
- *             2) fetch via proxy CORS → blob → enregistrement
- *             3) dernier recours : ouverture du lien dans un onglet.
- * Retourne true si le fichier a été enregistré par le navigateur.
+ *             2) plusieurs proxies CORS lancés EN PARALLÈLE — le premier
+ *                qui répond gagne (bien plus rapide sur réseau mobile)
+ *             → blob → enregistrement local via <a download>.
+ *
+ * N'ouvre JAMAIS d'onglet automatiquement : en cas d'échec, l'interface
+ * propose explicitement l'ouverture du fichier à l'utilisateur
+ * (plus de « page blanche » subie sur mobile).
  */
 export async function triggerDownload(rawUrl: string, filename: string): Promise<boolean> {
   const url = normalizeMediaUrl(rawUrl);
 
-  let blob = await fetchBlob(url, 40_000);
-  for (const proxy of CORS_PROXIES) {
-    if (blob) break;
-    blob = await fetchBlob(proxy(url), 80_000);
+  let blob = await fetchBlob(url, 20_000);
+  if (!blob) {
+    blob = await raceBlobs(CORS_PROXIES.map((p) => p(url)), 30_000);
   }
 
   if (blob && saveBlob(blob, filename)) return true;
-
-  // Dernier recours : l'utilisateur enregistre depuis le lecteur.
-  window.open(url, "_blank", "noopener,noreferrer");
   return false;
 }
 

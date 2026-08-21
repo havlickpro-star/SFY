@@ -10,6 +10,7 @@ import {
   formatBytes,
   triggerDownload,
   safeFilename,
+  normalizeMediaUrl,
 } from "../lib/resolver";
 import type { ResolvedMedia, MediaFormat, ErrorCode } from "../lib/resolver";
 import {
@@ -47,7 +48,7 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
   const [stage, setStage] = useState<"analyzing" | "fetching">("analyzing");
   const [error, setError] = useState<ErrorCode | null>(null);
   const [result, setResult] = useState<ResolvedMedia | null>(null);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; openUrl?: string } | null>(null);
   const [pasteHint, setPasteHint] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [doneIds, setDoneIds] = useState<string[]>([]);
@@ -111,10 +112,10 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
     setDoneIds((p) => (p.includes(id) ? p : [...p, id]));
   }
 
-  function showToast(msg: string) {
-    setToastMsg(msg);
+  function showToast(msg: string, openUrl?: string) {
+    setToast({ msg, openUrl });
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToastMsg(null), 4000);
+    toastTimer.current = window.setTimeout(() => setToast(null), 6000);
   }
 
   function baseFilename(ext: string, suffix?: string): string {
@@ -134,9 +135,9 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
     if (saved) {
       markDone(f.id);
     } else {
-      // Le fichier n'a pas pu être enregistré directement :
-      // il s'est ouvert dans un onglet pour être sauvegardé manuellement.
-      showToast(t.box.openFallback);
+      // Échec de l'enregistrement automatique : on propose (sans forcer)
+      // l'ouverture du fichier — plus de page blanche subie sur mobile.
+      showToast(t.box.openFallback, normalizeMediaUrl(f.url));
     }
   }
 
@@ -148,7 +149,7 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
     if (saved) {
       markDone(id);
     } else {
-      showToast(t.box.openFallback);
+      showToast(t.box.openFallback, normalizeMediaUrl(imgUrl));
     }
   }
 
@@ -519,10 +520,20 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
         ))}
       </ul>
 
-      {/* Toast */}
-      {toastMsg && (
-        <div className="anim-in fixed bottom-6 left-1/2 z-50 -translate-x-1/2 max-w-[92vw] rounded-xl bg-ink px-5 py-3 text-center text-sm font-medium text-white shadow-lift">
-          {toastMsg}
+      {/* Toast (avec action explicite en cas d'échec d'enregistrement) */}
+      {toast && (
+        <div className="anim-in fixed bottom-6 left-1/2 z-50 flex max-w-[92vw] -translate-x-1/2 items-center gap-3 rounded-xl bg-ink px-5 py-3.5 text-sm font-medium text-white shadow-lift">
+          <span className="text-center leading-snug">{toast.msg}</span>
+          {toast.openUrl && (
+            <a
+              href={toast.openUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-none rounded-lg bg-white/15 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-white/25 active:scale-95"
+            >
+              {t.box.openFile}
+            </a>
+          )}
         </div>
       )}
     </div>
