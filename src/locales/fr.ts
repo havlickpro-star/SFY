@@ -19,7 +19,7 @@ const fr: Dict = {
     h1a: "Téléchargeur de",
     h1b: "vidéos TikTok",
     subtitle:
-      "Téléchargez ou sauvegardez les options disponibles d'une vidéo TikTok publique directement depuis votre navigateur.",
+      "Téléchargez ou sauvegardez des vidéos publiques TikTok, Instagram, Facebook et YouTube — directement depuis votre navigateur.",
     formatsTitle: "Tout ce que SFY peut sauvegarder pour vous",
     formatsSub:
       "Un lien en entrée, plusieurs options propres en sortie. SFY n'affiche que ce qui est réellement disponible.",
@@ -112,7 +112,7 @@ const fr: Dict = {
     analyzing: "Analyse de la vidéo…",
     fetching: "Récupération des options disponibles…",
     errEmpty: "Collez d'abord un lien TikTok.",
-    errInvalid: "Ce lien TikTok ne semble pas valide.",
+    errInvalid: "Ce lien n'est pas pris en charge. SFY fonctionne avec TikTok, Instagram, Facebook et YouTube.",
     errInaccessible:
       "Nous n'avons pas pu accéder à ce contenu. Vérifiez qu'il est public et toujours disponible.",
     errGeneral: "Une erreur est survenue. Veuillez réessayer.",

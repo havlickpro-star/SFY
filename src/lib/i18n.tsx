@@ -12,6 +12,24 @@ import id from "../locales/id";
 
 export type Lang = "en" | "fr" | "es" | "pt" | "id";
 export type ToolMode = "video" | "mp3" | "photo" | "story";
+export type Platform = "tiktok" | "instagram" | "facebook" | "youtube";
+
+export const PLATFORMS: Platform[] = ["tiktok", "instagram", "facebook", "youtube"];
+
+/* Les placeholders sont des URLs — neutres en langue. */
+export const PLATFORM_PLACEHOLDERS: Record<Platform, string> = {
+  tiktok: "https://www.tiktok.com/@utilisateur/video/...",
+  instagram: "https://www.instagram.com/reel/...",
+  facebook: "https://www.facebook.com/watch?v=...",
+  youtube: "https://www.youtube.com/watch?v=...",
+};
+
+export const PLATFORM_LABELS: Record<Platform, string> = {
+  tiktok: "TikTok",
+  instagram: "Instagram",
+  facebook: "Facebook",
+  youtube: "YouTube",
+};
 
 export type ToolSlug =
   | "tiktok-video-downloader"

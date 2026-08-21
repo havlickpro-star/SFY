@@ -1,16 +1,23 @@
 import { useMemo, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { CSSProperties, FormEvent, ReactElement } from "react";
 import { Link } from "react-router-dom";
-import { useT, useLang, pagePath } from "../lib/i18n";
-import type { ToolMode } from "../lib/i18n";
+import {
+  useT,
+  useLang,
+  pagePath,
+  PLATFORMS,
+  PLATFORM_LABELS,
+  PLATFORM_PLACEHOLDERS,
+} from "../lib/i18n";
+import type { ToolMode, Platform } from "../lib/i18n";
 import {
   resolveMedia,
-  validateTikTokUrl,
+  validateMediaUrl,
+  normalizeMediaUrl,
   formatDuration,
   formatBytes,
   triggerDownload,
   safeFilename,
-  normalizeMediaUrl,
 } from "../lib/resolver";
 import type { ResolvedMedia, MediaFormat, ErrorCode } from "../lib/resolver";
 import {
@@ -26,9 +33,33 @@ import {
   IconPlay,
   IconRotate,
   IconSpark,
+  IconTikTok,
+  IconInstagram,
+  IconFacebook,
+  IconYouTube,
 } from "./Icons";
 
 const KIND_ICON = { video: IconFilm, audio: IconMusic, image: IconPhoto } as const;
+
+const PLATFORM_ICON: Record<Platform, (p: { size?: number; className?: string }) => ReactElement> = {
+  tiktok: (p) => <IconTikTok {...p} />,
+  instagram: (p) => <IconInstagram {...p} />,
+  facebook: (p) => <IconFacebook {...p} />,
+  youtube: (p) => <IconYouTube {...p} />,
+};
+
+function platformBadgeStyle(p: Platform): CSSProperties {
+  switch (p) {
+    case "instagram":
+      return { background: "radial-gradient(circle at 30% 110%, #fdc468 0%, #df4996 60%, #8a3ab9 100%)" };
+    case "facebook":
+      return { background: "#1877F2" };
+    case "youtube":
+      return { background: "#FF0033" };
+    default:
+      return {};
+  }
+}
 
 function errorText(code: ErrorCode, t: ReturnType<typeof useT>): string {
   switch (code) {
@@ -40,7 +71,13 @@ function errorText(code: ErrorCode, t: ReturnType<typeof useT>): string {
   }
 }
 
-export default function DownloadBox({ mode }: { mode: ToolMode }) {
+export default function DownloadBox({
+  mode,
+  platformLock,
+}: {
+  mode: ToolMode;
+  platformLock?: Platform;
+}) {
   const t = useT();
   const lang = useLang();
   const [url, setUrl] = useState("");
@@ -53,22 +90,28 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [doneIds, setDoneIds] = useState<string[]>([]);
   const [allBusy, setAllBusy] = useState(false);
+  const [activePlatform, setActivePlatform] = useState<Platform>(platformLock ?? "tiktok");
   const inputRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
-  const validity = useMemo(() => validateTikTokUrl(url), [url]);
+  const validity = useMemo(() => validateMediaUrl(url), [url]);
   const isValid = validity.ok;
+  const visiblePlatforms = platformLock ? [platformLock] : PLATFORMS;
   const clipboardAvailable =
     typeof navigator !== "undefined" && !!navigator.clipboard?.readText;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (status === "working") return;
-    const v = validateTikTokUrl(url);
+    const v = validateMediaUrl(url);
     if (!v.ok) {
       setError(v.code);
       setResult(null);
       setStatus("idle");
+      return;
+    }
+    if (platformLock && v.platform !== platformLock) {
+      setError("invalid");
       return;
     }
     setError(null);
@@ -97,7 +140,9 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
       if (text) {
         setUrl(text.trim());
         setError(null);
-        if (validateTikTokUrl(text).ok) inputRef.current?.focus();
+        const v = validateMediaUrl(text);
+        if (v.ok && !platformLock) setActivePlatform(v.platform);
+        if (v.ok) inputRef.current?.focus();
       } else {
         inputRef.current?.focus();
       }
@@ -108,35 +153,33 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
     }
   }
 
-  function markDone(id: string) {
-    setDoneIds((p) => (p.includes(id) ? p : [...p, id]));
-  }
-
   function showToast(msg: string, openUrl?: string) {
     setToast({ msg, openUrl });
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 6000);
   }
 
+  function markDone(id: string) {
+    setDoneIds((p) => (p.includes(id) ? p : [...p, id]));
+  }
+
   function baseFilename(ext: string, suffix?: string): string {
-    if (!result) return `sfy-tiktok.${ext.toLowerCase()}`;
-    return safeFilename(result.authorId || result.title || "tiktok", result.id ? `${result.id}${suffix ?? ""}` : suffix, ext);
+    if (!result) return `sfy-media.${ext.toLowerCase()}`;
+    const prefix = result.authorId || result.author || result.title || result.platform;
+    return safeFilename(prefix, result.id ? `${result.id}${suffix ?? ""}` : suffix, ext);
   }
 
   async function handleFormatDownload(f: MediaFormat) {
     if (!f.url) {
-      // Pas de lien réel (mode démo) → notification honnête.
       showToast(t.box.demoToast);
       return;
     }
     setBusyId(f.id);
-    const saved = await triggerDownload(f.url, baseFilename(f.ext, `-${f.id}`));
+    const saved = await triggerDownload(f.url, f.suggestedName ?? baseFilename(f.ext, `-${f.id}`));
     setBusyId(null);
     if (saved) {
       markDone(f.id);
     } else {
-      // Échec de l'enregistrement automatique : on propose (sans forcer)
-      // l'ouverture du fichier — plus de page blanche subie sur mobile.
       showToast(t.box.openFallback, normalizeMediaUrl(f.url));
     }
   }
@@ -191,12 +234,36 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
 
   const duration = result ? formatDuration(result.durationSec) : null;
   const showSlides = !!result?.images?.length;
+  const detectedPlatform: Platform = validity.ok ? validity.platform : activePlatform;
 
   return (
     <div className="relative">
       <div className="focus-ring rounded-[22px] border border-ink/8 bg-white p-5 shadow-soft transition-shadow duration-300 sm:p-7">
         {status !== "done" && (
           <form onSubmit={handleSubmit} noValidate>
+            {/* Plateformes prises en charge */}
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              {visiblePlatforms.map((p) => {
+                const active = detectedPlatform === p;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setActivePlatform(p)}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all duration-200 active:scale-95 ${
+                      active
+                        ? "grad-bg border-transparent text-white shadow-chip"
+                        : "border-ink/10 bg-mist text-muted hover:border-brand/40 hover:text-brand"
+                    }`}
+                  >
+                    {PLATFORM_ICON[p]({ size: 14 })}
+                    {PLATFORM_LABELS[p]}
+                  </button>
+                );
+              })}
+            </div>
+
             <div className="flex flex-col gap-3 md:flex-row">
               {/* Champ URL */}
               <div className="relative flex-1">
@@ -212,8 +279,8 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
                   value={url}
                   disabled={status === "working"}
                   onChange={(e) => { setUrl(e.target.value); setError(null); }}
-                  placeholder={t.box.placeholder}
-                  aria-label="URL TikTok"
+                  placeholder={PLATFORM_PLACEHOLDERS[activePlatform]}
+                  aria-label="URL"
                   className="h-14 w-full rounded-xl border border-ink/10 bg-mist pl-11 pr-11 text-[15px] font-medium text-ink outline-none transition-all placeholder:font-normal placeholder:text-muted/70 focus:border-brand/60 focus:bg-white focus:ring-4 focus:ring-brand/12 disabled:opacity-60"
                 />
                 {isValid && (
@@ -289,10 +356,9 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
                 {result.thumbnail ? (
                   <img
                     src={result.thumbnail}
-                    alt={result.title || "TikTok"}
+                    alt={result.title || PLATFORM_LABELS[result.platform]}
                     className="h-full w-full object-cover"
                     loading="lazy"
-                    referrerPolicy="no-referrer"
                   />
                 ) : (
                   <div className="grad-bg flex h-full w-full items-center justify-center text-white/90">
@@ -309,8 +375,11 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
               {/* Métadonnées */}
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="grad-bg rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-                    TikTok
+                  <span
+                    className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white ${result.platform === "tiktok" ? "grad-bg" : ""}`}
+                    style={platformBadgeStyle(result.platform)}
+                  >
+                    {PLATFORM_LABELS[result.platform]}
                   </span>
                   {result.demo && (
                     <span className="flex items-center gap-1 rounded-md border border-amber-300/70 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700">
@@ -320,18 +389,7 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
                   )}
                 </div>
                 <p className="mt-2 truncate text-sm font-bold text-ink">
-                  {result.authorUrl ? (
-                    <a
-                      href={result.authorUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="link-underline hover:text-brand"
-                    >
-                      {result.author}
-                    </a>
-                  ) : (
-                    result.author || (result.demo ? t.box.demoAuthor : "—")
-                  )}
+                  {result.author || (result.demo ? t.box.demoAuthor : result.authorId || "—")}
                 </p>
                 <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted">
                   {result.title || (result.demo ? t.box.demoTitle : "—")}
@@ -349,68 +407,8 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
               </h2>
             </div>
 
-            {/* Diapositives (posts photo) */}
-            {showSlides && (
-              <div className="mt-4 rounded-2xl border border-ink/6 bg-mist/70 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
-                    {t.box.photosHeader}
-                    <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[11px] font-bold text-brand">
-                      {result.images!.length}
-                    </span>
-                  </p>
-                  <button
-                    onClick={handleDownloadAll}
-                    disabled={allBusy}
-                    className="btn-primary flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold disabled:opacity-60"
-                  >
-                    {allBusy ? <span className="spin-ring" style={{ width: 14, height: 14 }} aria-hidden /> : <IconDownload size={14} />}
-                    {t.box.downloadAll}
-                  </button>
-                </div>
-                <div className="mt-3 grid grid-cols-3 gap-2.5 sm:grid-cols-4 md:grid-cols-5">
-                  {result.images!.map((img, i) => {
-                    const id = `img-${i}`;
-                    const done = doneIds.includes(id);
-                    return (
-                      <div key={img} className="group relative aspect-[3/4] overflow-hidden rounded-xl bg-tint shadow-soft">
-                        <img
-                          src={img}
-                          alt={`${t.box.photosHeader} ${i + 1}`}
-                          loading="lazy"
-                          referrerPolicy="no-referrer"
-                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        />
-                        <span className="absolute left-1.5 top-1.5 rounded-md bg-ink/70 px-1.5 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
-                          {i + 1}
-                        </span>
-                        <button
-                          onClick={() => handleImageDownload(img, i)}
-                          disabled={busyId === id}
-                          aria-label={`${t.box.download} ${i + 1}`}
-                          className={`absolute bottom-1.5 right-1.5 flex h-8 w-8 items-center justify-center rounded-lg shadow-chip transition-all duration-200 active:scale-90 ${
-                            done
-                              ? "bg-emerald-500 text-white"
-                              : "bg-white/95 text-brand hover:bg-white"
-                          }`}
-                        >
-                          {busyId === id ? (
-                            <span className="spin-ring" style={{ width: 14, height: 14 }} aria-hidden />
-                          ) : done ? (
-                            <IconCheck size={15} />
-                          ) : (
-                            <IconDownload size={15} />
-                          )}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
             {/* Formats */}
-            {!showSlides && (
+            {result.formats.length > 0 && (
               <div className="mt-4 rounded-2xl border border-ink/6 bg-mist/70 p-1.5">
                 <p className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
                   {t.box.formatsLabel}
@@ -418,8 +416,9 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
                 <ul className="divide-y divide-ink/5">
                   {result.formats.map((f) => {
                     const Ic = KIND_ICON[f.kind];
+                    const busy = busyId === f.id;
                     const done = doneIds.includes(f.id);
-                    const meta = [f.quality, formatBytes(f.sizeBytes)].filter(Boolean).join(" · ");
+                    const size = formatBytes(f.sizeBytes);
                     return (
                       <li
                         key={f.id}
@@ -440,23 +439,27 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
                               </span>
                             )}
                           </span>
-                          {meta && <span className="text-xs text-muted">{meta}</span>}
+                          {(f.quality || size) && (
+                            <span className="text-xs text-muted">
+                              {[f.quality, size].filter(Boolean).join(" · ")}
+                            </span>
+                          )}
                         </span>
                         <span className="hidden rounded-md border border-ink/10 bg-white px-2 py-1 text-[10px] font-bold tracking-wider text-muted sm:block">
                           {f.ext}
                         </span>
                         <button
                           onClick={() => handleFormatDownload(f)}
-                          disabled={busyId === f.id}
-                          className={`flex w-[7.2rem] items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[13px] font-semibold transition-all duration-200 active:scale-[0.97] ${
+                          disabled={busy}
+                          className={`flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-[13px] font-semibold transition-all active:scale-95 ${
                             done
-                              ? "bg-emerald-500 text-white shadow-chip"
+                              ? "bg-emerald-100 text-emerald-700"
                               : "btn-primary"
                           }`}
                         >
-                          {busyId === f.id ? (
+                          {busy ? (
                             <>
-                              <span className="spin-ring" style={{ width: 15, height: 15 }} aria-hidden />
+                              <span className="spin-ring" aria-hidden />
                               <span className="hidden sm:inline">{t.box.preparing}</span>
                             </>
                           ) : done ? (
@@ -475,6 +478,52 @@ export default function DownloadBox({ mode }: { mode: ToolMode }) {
                     );
                   })}
                 </ul>
+              </div>
+            )}
+
+            {/* Photos / diapositives */}
+            {showSlides && result.images && (
+              <div className="mt-4 rounded-2xl border border-ink/6 bg-mist/70 p-3">
+                <div className="flex items-center justify-between px-1 pb-2">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
+                    {t.box.photosHeader}
+                  </p>
+                  <button
+                    onClick={handleDownloadAll}
+                    disabled={allBusy}
+                    className="flex items-center gap-1.5 rounded-lg border border-brand/25 bg-tint/60 px-3 py-1.5 text-xs font-semibold text-brand transition-all hover:bg-tint active:scale-95 disabled:opacity-50"
+                  >
+                    {allBusy ? <span className="spin-ring" aria-hidden /> : <IconDownload size={13} />}
+                    {t.box.downloadAll}
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  {result.images.map((img, i) => {
+                    const id = `img-${i}`;
+                    const busy = busyId === id;
+                    const done = doneIds.includes(id);
+                    return (
+                      <div key={id} className="group relative aspect-[3/4] overflow-hidden rounded-xl bg-tint">
+                        <img
+                          src={img}
+                          alt={`Photo ${i + 1}`}
+                          loading="lazy"
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        />
+                        <button
+                          onClick={() => handleImageDownload(img, i)}
+                          disabled={busy}
+                          aria-label={`${t.box.download} ${i + 1}`}
+                          className={`absolute bottom-1.5 right-1.5 flex h-8 w-8 items-center justify-center rounded-lg shadow-chip transition-all active:scale-90 ${
+                            done ? "bg-emerald-500 text-white" : "grad-bg text-white opacity-90 group-hover:opacity-100"
+                          }`}
+                        >
+                          {busy ? <span className="spin-ring" aria-hidden /> : done ? <IconCheck size={15} /> : <IconDownload size={15} />}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

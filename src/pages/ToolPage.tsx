@@ -74,7 +74,10 @@ export default function ToolPage({ slug }: { slug: PageSlug }) {
 
           <Reveal delay={180}>
             <div id="tool" className="mx-auto mt-8 max-w-[52rem] scroll-mt-28">
-              <DownloadBox mode={page.toolMode} />
+              <DownloadBox
+                mode={page.toolMode}
+                platformLock={slug.startsWith("tiktok") ? "tiktok" : undefined}
+              />
             </div>
           </Reveal>
         </div>

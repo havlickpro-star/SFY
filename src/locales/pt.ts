@@ -19,7 +19,7 @@ const pt: Dict = {
     h1a: "Downloader de",
     h1b: "vídeos do TikTok",
     subtitle:
-      "Baixe ou salve as opções disponíveis de um vídeo público do TikTok diretamente do seu navegador.",
+      "Baixe ou salve vídeos públicos do TikTok, Instagram, Facebook e YouTube direto do seu navegador.",
     formatsTitle: "Tudo o que o SFY pode salvar para você",
     formatsSub: "Um link entra, várias opções limpas saem. O SFY mostra só o que existe de verdade.",
     formats: [
@@ -62,7 +62,7 @@ const pt: Dict = {
     analyzing: "Analisando o vídeo…",
     fetching: "Buscando as opções disponíveis…",
     errEmpty: "Cole um link do TikTok primeiro.",
-    errInvalid: "Esse link do TikTok não parece válido.",
+    errInvalid: "Esse link não é compatível. O SFY funciona com TikTok, Instagram, Facebook e YouTube.",
     errInaccessible: "Não conseguimos acessar este conteúdo. Verifique se é público e ainda está disponível.",
     errGeneral: "Algo deu errado. Tente novamente.",
     errRate: "Muitas solicitações em pouco tempo. Tente novamente em instantes.",

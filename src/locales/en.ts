@@ -19,7 +19,7 @@ const en: Dict = {
     h1a: "TikTok Video",
     h1b: "Downloader",
     subtitle:
-      "Download or save the available options of a public TikTok video — right from your browser.",
+      "Download or save public videos from TikTok, Instagram, Facebook and YouTube — right from your browser.",
     formatsTitle: "Everything SFY can save for you",
     formatsSub:
       "One link in, several clean options out. SFY only shows what is actually available.",
@@ -112,7 +112,7 @@ const en: Dict = {
     analyzing: "Analyzing the video…",
     fetching: "Fetching available options…",
     errEmpty: "Paste a TikTok link first.",
-    errInvalid: "That doesn't look like a valid TikTok link.",
+    errInvalid: "That link isn't supported. SFY works with TikTok, Instagram, Facebook and YouTube.",
     errInaccessible:
       "We couldn't access this content. Check that it's public and still available.",
     errGeneral: "Something went wrong. Please try again.",
